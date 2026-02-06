@@ -61,6 +61,8 @@ MODULE integrator
                                               npe_f_ensemble,&
                                               npe_i_ensemble,&
                                               npt_ia_ensemble
+   USE input_section_types,             ONLY: section_vals_get_subs_vals,&
+                                              section_vals_type
    USE integrator_utils,                ONLY: &
         allocate_old, allocate_tmp, damp_v, damp_veps, deallocate_old, get_s_ds, &
         old_variables_type, rattle_roll_setup, set, tmp_variables_type, update_dealloc_tmp, &
@@ -102,6 +104,11 @@ MODULE integrator
                                               apply_thermostat_particles,&
                                               apply_thermostat_shells
    USE thermostat_types,                ONLY: thermostat_type
+   USE thermopotentiostat_types,        ONLY: thermopotentiostat_type,&
+                                              thermopotentiostat_release
+   USE thermopotentiostat_methods,      ONLY: thermopotentiostat_init,&
+                                              thermopotentiostat_update,&
+                                              update_zeff_correction_for_dipole
    USE virial_methods,                  ONLY: virial_evaluate
    USE virial_types,                    ONLY: virial_type
 #include "../base/base_uses.f90"
@@ -114,6 +121,7 @@ MODULE integrator
 
    PUBLIC :: isokin, langevin, nve, nvt, npt_i, npt_f, nve_respa
    PUBLIC :: nph_uniaxial_damped, nph_uniaxial, nvt_adiabatic, reftraj
+   PUBLIC :: thermopotentiostat
 
 CONTAINS
 
@@ -584,6 +592,182 @@ CONTAINS
                            local_particles, virial, para_env)
 
    END SUBROUTINE nve
+
+! **************************************************************************************************
+!> \brief Thermopotentiostat integrator for controlling dipole moment via zeff_correction
+!>        Based on NVE integrator with additional feedback control of core correction.
+!>        The electron density is adjusted according to the applied core correction
+!>        following the approach in PRL 120, 246801 (2018).
+!> \param md_env the MD environment
+!> \param globenv the global environment
+!> \par History
+!>      02.2026 created [thermopotentiostat implementation]
+!> \author CP2K developers
+! **************************************************************************************************
+   SUBROUTINE thermopotentiostat(md_env, globenv)
+
+      TYPE(md_environment_type), POINTER                 :: md_env
+      TYPE(global_environment_type), POINTER             :: globenv
+
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'thermopotentiostat'
+
+      INTEGER                                            :: handle, nparticle, nparticle_kind, nshell
+      INTEGER, POINTER                                   :: itimes
+      LOGICAL                                            :: dipole_available, shell_adiabatic, &
+                                                            shell_check_distance, shell_present
+      REAL(KIND=dp)                                      :: dt
+      REAL(KIND=dp), DIMENSION(3)                        :: dipole_moment
+      TYPE(atomic_kind_list_type), POINTER               :: atomic_kinds
+      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
+      TYPE(cell_type), POINTER                           :: cell
+      TYPE(cp_subsys_type), POINTER                      :: subsys
+      TYPE(distribution_1d_type), POINTER                :: local_molecules, local_particles
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(global_constraint_type), POINTER              :: gci
+      TYPE(molecule_kind_list_type), POINTER             :: molecule_kinds
+      TYPE(molecule_kind_type), DIMENSION(:), POINTER    :: molecule_kind_set
+      TYPE(molecule_list_type), POINTER                  :: molecules
+      TYPE(molecule_type), DIMENSION(:), POINTER         :: molecule_set
+      TYPE(mp_para_env_type), POINTER                    :: para_env
+      TYPE(particle_list_type), POINTER                  :: core_particles, particles, &
+                                                            shell_particles
+      TYPE(particle_type), DIMENSION(:), POINTER         :: core_particle_set, particle_set, &
+                                                            shell_particle_set
+      TYPE(simpar_type), POINTER                         :: simpar
+      TYPE(thermopotentiostat_type), POINTER             :: thermo_pot
+      TYPE(tmp_variables_type), POINTER                  :: tmp
+      TYPE(virial_type), POINTER                         :: virial
+      TYPE(section_vals_type), POINTER                   :: md_section, motion_section
+
+      CALL timeset(routineN, handle)
+
+      NULLIFY (tmp, thermo_pot)
+      NULLIFY (subsys, simpar, para_env, cell, gci, force_env, virial)
+      NULLIFY (atomic_kinds, local_particles, molecules, molecule_kind_set, molecule_set, particle_set)
+      NULLIFY (shell_particles, shell_particle_set, core_particles, core_particle_set, itimes)
+      NULLIFY (md_section, motion_section)
+
+      ! Get MD environment components
+      CALL get_md_env(md_env=md_env, simpar=simpar, force_env=force_env, &
+                      para_env=para_env, itimes=itimes)
+      dt = simpar%dt
+
+      CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell)
+
+      CALL cp_subsys_get(subsys=subsys, atomic_kinds=atomic_kinds, local_particles=local_particles, &
+                         particles=particles, local_molecules=local_molecules, molecules=molecules, &
+                         molecule_kinds=molecule_kinds, gci=gci, virial=virial)
+
+      nparticle_kind = atomic_kinds%n_els
+      atomic_kind_set => atomic_kinds%els
+      molecule_kind_set => molecule_kinds%els
+
+      nparticle = particles%n_els
+      particle_set => particles%els
+      molecule_set => molecules%els
+
+      CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set, &
+                               shell_present=shell_present, shell_adiabatic=shell_adiabatic, &
+                               shell_check_distance=shell_check_distance)
+
+      IF (shell_present) THEN
+         CALL cp_subsys_get(subsys=subsys, shell_particles=shell_particles, &
+                            core_particles=core_particles)
+         shell_particle_set => shell_particles%els
+         nshell = SIZE(shell_particles%els)
+
+         IF (shell_adiabatic) THEN
+            core_particle_set => core_particles%els
+         END IF
+      ELSE
+         nshell = 0
+      END IF
+
+      ! Initialize thermopotentiostat if first step
+      CALL get_md_env(md_env=md_env, thermopotentiostat=thermo_pot)
+      IF (.NOT. ASSOCIATED(thermo_pot)) THEN
+         ! Get the MD section for reading thermopotentiostat parameters
+         CALL force_env_get(force_env, root_section=motion_section)
+         md_section => section_vals_get_subs_vals(motion_section, "MOTION%MD")
+         CALL thermopotentiostat_init(thermo_pot, md_section, force_env%qs_env)
+         ! Store in md_env for persistence across timesteps
+         CALL set_md_env(md_env, thermopotentiostat=thermo_pot)
+      END IF
+
+      ! Allocate temporary storage
+      CALL allocate_tmp(md_env, tmp, nparticle, nshell, shell_adiabatic)
+
+      IF (simpar%constraint) CALL getold(gci, local_molecules, molecule_set, &
+                                         molecule_kind_set, particle_set, cell)
+
+      ! Velocity Verlet (first part)
+      CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
+                    core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
+
+      IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
+                                                     local_particles, particle_set, core_particle_set, shell_particle_set, &
+                                                     nparticle_kind, shell_adiabatic)
+
+      IF (simpar%constraint) THEN
+         CALL shake_update_targets(gci, local_molecules, molecule_set, &
+                                   molecule_kind_set, dt, force_env%root_section)
+
+         CALL shake_control(gci, local_molecules, molecule_set, &
+                            molecule_kind_set, particle_set, tmp%pos, tmp%vel, dt, simpar%shake_tol, &
+                            simpar%info_constraint, simpar%lagrange_multipliers, simpar%dump_lm, &
+                            cell, para_env, local_particles)
+      END IF
+
+      ! Broadcast the new particle positions
+      CALL update_dealloc_tmp(tmp, particle_set, shell_particle_set, &
+                              core_particle_set, para_env, shell_adiabatic, pos=.TRUE.)
+
+      ! Calculate forces with current configuration
+      CALL force_env_calc_energy_force(force_env)
+
+      ! === THERMOPOTENTIOSTAT UPDATE ===
+      ! After force calculation, update zeff_correction based on dipole moment
+      IF (ASSOCIATED(force_env%qs_env) .AND. ASSOCIATED(thermo_pot)) THEN
+         ! Update thermopotentiostat based on current dipole
+         CALL thermopotentiostat_update(thermo_pot, force_env%qs_env, dt, &
+                                        dipole_moment, dipole_available)
+
+         ! Apply the updated zeff_correction to the system
+         ! This modifies the GTH potential and qs_env%total_zeff_corr
+         ! The electron density will be adjusted in the next SCF cycle
+         CALL update_zeff_correction_for_dipole(thermo_pot, force_env%qs_env)
+      END IF
+
+      ! Metadynamics
+      CALL metadyn_integrator(force_env, itimes, tmp%vel)
+
+      ! Velocity Verlet (second part)
+      CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
+                     core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
+
+      IF (simpar%constraint) CALL rattle_control(gci, local_molecules, molecule_set, &
+                                                 molecule_kind_set, particle_set, tmp%vel, dt, simpar%shake_tol, &
+                                                 simpar%info_constraint, simpar%lagrange_multipliers, simpar%dump_lm, &
+                                                 cell, para_env, local_particles)
+
+      IF (simpar%annealing) THEN
+         tmp%vel(:, :) = tmp%vel(:, :)*simpar%f_annealing
+      END IF
+
+      ! Broadcast the new particle velocities
+      CALL update_dealloc_tmp(tmp, particle_set, shell_particle_set, &
+                              core_particle_set, para_env, shell_adiabatic, vel=.TRUE.)
+
+      ! Update virial
+      IF (simpar%constraint) CALL pv_constraint(gci, local_molecules, &
+                                                molecule_set, molecule_kind_set, particle_set, virial, para_env)
+
+      CALL virial_evaluate(atomic_kind_set, particle_set, &
+                           local_particles, virial, para_env)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE thermopotentiostat
 
 ! **************************************************************************************************
 !> \brief simplest version of the isokinetic gaussian thermostat

@@ -26,7 +26,7 @@ MODULE input_cp2k_md
         isokin_ensemble, langevin_ensemble, md_init_default, md_init_vib, npe_f_ensemble, &
         npe_i_ensemble, nph_ensemble, nph_uniaxial_damped_ensemble, nph_uniaxial_ensemble, &
         npt_f_ensemble, npt_i_ensemble, npt_ia_ensemble, nve_ensemble, nvt_adiabatic_ensemble, &
-        nvt_ensemble, reftraj_ensemble
+        nvt_ensemble, reftraj_ensemble, thermopotentiostat_ensemble
    USE input_cp2k_barostats,            ONLY: create_barostat_section
    USE input_cp2k_thermostats,          ONLY: create_region_section,&
                                               create_thermo_fast_section,&
@@ -83,7 +83,7 @@ CONTAINS
                           default_i_val=nve_ensemble, &
                           enum_c_vals=s2a("NVE", "NVT", "NPT_I", "NPT_F", "MSST", "MSST_DAMPED", &
                                           "HYDROSTATICSHOCK", "ISOKIN", "REFTRAJ", "LANGEVIN", "NPE_F", &
-                                          "NPE_I", "NVT_ADIABATIC", "NPT_IA"), &
+                                          "NPE_I", "NVT_ADIABATIC", "NPT_IA", "THERMOPOTENTIOSTAT"), &
                           enum_desc=s2a("constant energy (microcanonical)", &
                                         "constant temperature and volume (canonical)", &
                                         "constant temperature and pressure using an isotropic cell", &
@@ -97,12 +97,13 @@ CONTAINS
                                         "constant pressure ensemble (no thermostat)", &
                                         "constant pressure ensemble using an isotropic cell (no thermostat)", &
                                         "adiabatic dynamics in constant temperature and volume ensemble (CAFES)", &
-                                        "NPT_I ensemble with frozen atoms in absolute coordinate"), &
+                                        "NPT_I ensemble with frozen atoms in absolute coordinate", &
+                                        "thermopotentiostat: controls dipole moment via zeff_correction"), &
                           citations=[Evans1983, VandeVondele2002, Minary2003], &
                           enum_i_vals=[nve_ensemble, nvt_ensemble, npt_i_ensemble, npt_f_ensemble, &
                                        nph_uniaxial_ensemble, nph_uniaxial_damped_ensemble, nph_ensemble, isokin_ensemble, &
                                        reftraj_ensemble, langevin_ensemble, npe_f_ensemble, npe_i_ensemble, &
-                                       nvt_adiabatic_ensemble, npt_ia_ensemble])
+                                       nvt_adiabatic_ensemble, npt_ia_ensemble, thermopotentiostat_ensemble])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -264,6 +265,10 @@ CONTAINS
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
+      CALL create_thermopotentiostat_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
       CALL create_msst_section(subsection)
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
@@ -365,6 +370,97 @@ CONTAINS
    END SUBROUTINE create_langevin_section
 
 ! **************************************************************************************************
+!> \brief Defines THERMOPOTENTIOSTAT section for dipole-controlled core correction
+!> \param section the section to create
+!> \par History
+!>      02.2026 created [thermopotentiostat implementation]
+!> \author CP2K developers
+! **************************************************************************************************
+   SUBROUTINE create_thermopotentiostat_section(section)
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(keyword_type), POINTER                        :: keyword
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+      CALL section_create(section, __LOCATION__, name="THERMOPOTENTIOSTAT", &
+                          description="Controls the thermopotentiostat ensemble which varies the "// &
+                          "zeff_correction of a selected atom type based on the system dipole moment. "// &
+                          "This allows control of the electrochemical potential in surface simulations. "// &
+                          "The method adjusts the electron density according to the applied core correction "// &
+                          "following the approach in PRL 120, 246801 (2018). "// &
+                          "Requires DFT%PRINT%MOMENTS to be enabled for dipole calculation.", &
+                          n_keywords=8, n_subsections=0, repeats=.FALSE.)
+      NULLIFY (keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="TARGET_DIPOLE", &
+                          description="The target dipole moment component in atomic units (e*bohr). "// &
+                          "The thermopotentiostat will adjust zeff_correction to drive the dipole "// &
+                          "towards this value.", &
+                          usage="TARGET_DIPOLE 0.0", default_r_val=0.0_dp, &
+                          unit_str="debye")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="DIPOLE_DIRECTION", &
+                          description="The Cartesian direction of the dipole moment to control.", &
+                          usage="DIPOLE_DIRECTION Z", &
+                          default_i_val=3, &
+                          enum_c_vals=s2a("X", "Y", "Z"), &
+                          enum_desc=s2a("X component of dipole", &
+                                        "Y component of dipole", &
+                                        "Z component of dipole (default, typical for surfaces)"), &
+                          enum_i_vals=[1, 2, 3])
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="COUPLING_STRENGTH", &
+                          description="The proportional feedback coupling strength (gain). "// &
+                          "Controls how strongly the zeff_correction responds to dipole deviations. "// &
+                          "Larger values give faster response but may cause oscillations.", &
+                          usage="COUPLING_STRENGTH 0.1", default_r_val=0.1_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="ELEMENT", &
+                          description="The element symbol of the atom kind whose zeff_correction "// &
+                          "will be varied by the thermopotentiostat. Must match an element in the system.", &
+                          usage="ELEMENT Li", default_c_val="")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="MAX_ZEFF_CORRECTION", &
+                          description="Maximum allowed positive zeff_correction value. "// &
+                          "Limits the range of the feedback control.", &
+                          usage="MAX_ZEFF_CORRECTION 1.0", default_r_val=1.0_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="MIN_ZEFF_CORRECTION", &
+                          description="Minimum allowed (most negative) zeff_correction value. "// &
+                          "Limits the range of the feedback control.", &
+                          usage="MIN_ZEFF_CORRECTION -1.0", default_r_val=-1.0_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="USE_INTEGRAL_CONTROL", &
+                          description="Whether to use PI (proportional-integral) control instead "// &
+                          "of just proportional control. Integral control can eliminate steady-state "// &
+                          "errors but may cause overshoot.", &
+                          usage="USE_INTEGRAL_CONTROL .TRUE.", default_l_val=.FALSE., &
+                          lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="INTEGRAL_GAIN", &
+                          description="The integral gain for PI control. Only used when "// &
+                          "USE_INTEGRAL_CONTROL is enabled.", &
+                          usage="INTEGRAL_GAIN 0.01", default_r_val=0.01_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+   END SUBROUTINE create_thermopotentiostat_section
+
+! **************************************************************************************************
 !> \brief Defines print section for MD
 !> \param section ...
 !> \author teo
@@ -452,6 +548,14 @@ CONTAINS
                                        description="Controls the printing of basic and summary information during the"// &
                                        " Molecular Dynamics", &
                                        print_level=low_print_level, add_last=add_last_numeric, filename="__STD_OUT__")
+      CALL section_add_subsection(section, print_key)
+      CALL section_release(print_key)
+
+      CALL cp_print_key_section_create(print_key, __LOCATION__, "THERMOPOTENTIOSTAT", &
+                                       description="Controls the output of the thermopotentiostat file "// &
+                                       "containing timestep, dipole moment, and zeff correction.", &
+                                       print_level=low_print_level, common_iter_levels=1, &
+                                       filename="")
       CALL section_add_subsection(section, print_key)
       CALL section_release(print_key)
    END SUBROUTINE create_md_print_section
