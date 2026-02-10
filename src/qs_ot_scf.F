@@ -123,9 +123,10 @@ CONTAINS
 !> \param energy_only ...
 !> \param delta ...
 !> \param qs_ot_env ...
+!> \param tot_zeff_corr Total core correction for adjusting electron count (optional)
 ! **************************************************************************************************
    SUBROUTINE ot_scf_mini(mo_array, matrix_dedc, smear, matrix_s, energy, &
-                          energy_only, delta, qs_ot_env)
+                          energy_only, delta, qs_ot_env, tot_zeff_corr)
 
       TYPE(mo_set_type), DIMENSION(:), INTENT(INOUT)     :: mo_array
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_dedc
@@ -135,11 +136,12 @@ CONTAINS
       LOGICAL, INTENT(INOUT)                             :: energy_only
       REAL(KIND=dp)                                      :: delta
       TYPE(qs_ot_type), DIMENSION(:), POINTER            :: qs_ot_env
+      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: tot_zeff_corr
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'ot_scf_mini'
 
       INTEGER                                            :: handle, ispin, k, n, nspin
-      REAL(KIND=dp)                                      :: ener_nondiag, trace
+      REAL(KIND=dp)                                      :: ener_nondiag, total_zeff_corr, trace
       TYPE(cp_1d_r_p_type), ALLOCATABLE, DIMENSION(:)    :: expectation_values, occupation_numbers, &
                                                             scaling_factor
       TYPE(cp_logger_type), POINTER                      :: logger
@@ -152,6 +154,19 @@ CONTAINS
       logger => cp_get_default_logger()
 
       nspin = SIZE(mo_array)
+
+      ! Handle core correction for adjusting electron count
+      total_zeff_corr = 0.0_dp
+      IF (PRESENT(tot_zeff_corr)) total_zeff_corr = tot_zeff_corr
+
+      ! Apply core correction to occupation numbers BEFORE reading them
+      ! This ensures the scaling factor uses the corrected occupations
+      IF (ABS(total_zeff_corr) > 0.0_dp) THEN
+         DO ispin = 1, nspin
+            CALL set_mo_occupation(mo_set=mo_array(ispin), &
+                                   smear=smear, tot_zeff_corr=total_zeff_corr)
+         END DO
+      END IF
 
       ALLOCATE (occupation_numbers(nspin))
       ALLOCATE (scaling_factor(nspin))
@@ -201,6 +216,7 @@ CONTAINS
                DO ispin = 1, SIZE(mo_array)
                   CALL dbcsr_get_diag(qs_ot_env(ispin)%rot_mat_chc, expectation_values(ispin)%array)
                   qs_ot_env(ispin)%ener_gx = expectation_values(ispin)%array
+                  ! Note: tot_zeff_corr already applied at start of ot_scf_mini
                   CALL set_mo_occupation(mo_set=mo_array(ispin), &
                                          smear=smear, eval_deriv=qs_ot_env(ispin)%ener_gx)
                END DO
@@ -313,8 +329,13 @@ CONTAINS
       IF (qs_ot_env(1)%settings%do_ener) THEN
          DO ispin = 1, SIZE(mo_array)
             mo_array(ispin)%eigenvalues = qs_ot_env(ispin)%ener_x
-            CALL set_mo_occupation(mo_set=mo_array(ispin), &
-                                   smear=smear)
+            IF (ABS(total_zeff_corr) > 0.0_dp) THEN
+               CALL set_mo_occupation(mo_set=mo_array(ispin), &
+                                      smear=smear, tot_zeff_corr=total_zeff_corr)
+            ELSE
+               CALL set_mo_occupation(mo_set=mo_array(ispin), &
+                                      smear=smear)
+            END IF
          END DO
       END IF
 
