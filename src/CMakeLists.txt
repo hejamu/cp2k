@@ -1176,6 +1176,8 @@ list(
   motion/space_groups_types.F
   motion/thermal_region_types.F
   motion/thermal_region_utils.F
+  motion/thermopotentiostat_methods.F
+  motion/thermopotentiostat_types.F
   motion/thermostat/al_system_dynamics.F
   motion/thermostat/al_system_init.F
   motion/thermostat/al_system_mapping.F
