@@ -396,8 +396,7 @@ CONTAINS
                           description="The target dipole moment component in atomic units (e*bohr). "// &
                           "The thermopotentiostat will adjust zeff_correction to drive the dipole "// &
                           "towards this value.", &
-                          usage="TARGET_DIPOLE 0.0", default_r_val=0.0_dp, &
-                          unit_str="debye")
+                          usage="TARGET_DIPOLE 0.0", default_r_val=0.0_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

@@ -25,7 +25,8 @@ MODULE md_conserved_quantities
    USE input_constants,                 ONLY: &
         isokin_ensemble, langevin_ensemble, npe_f_ensemble, npe_i_ensemble, &
         nph_uniaxial_damped_ensemble, nph_uniaxial_ensemble, npt_f_ensemble, npt_i_ensemble, &
-        npt_ia_ensemble, nve_ensemble, nvt_adiabatic_ensemble, nvt_ensemble, reftraj_ensemble
+        npt_ia_ensemble, nve_ensemble, nvt_adiabatic_ensemble, nvt_ensemble, reftraj_ensemble, &
+        thermopotentiostat_ensemble
    USE input_section_types,             ONLY: section_vals_type,&
                                               section_vals_val_get
    USE kinds,                           ONLY: dp
@@ -165,6 +166,9 @@ CONTAINS
          md_ener%temp_baro = md_ener%temp_baro*kelvin
       CASE (nvt_adiabatic_ensemble)
          CALL get_econs_nvt_adiabatic(md_env, md_ener, para_env)
+      CASE (thermopotentiostat_ensemble)
+         ! Thermopotentiostat: conserved quantity is total energy (like NVE)
+         md_ener%constant = md_ener%ekin + md_ener%epot
       END SELECT
 
       IF (init) THEN

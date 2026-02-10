@@ -63,10 +63,9 @@ MODULE thermopotentiostat_methods
    USE qs_kind_types,                   ONLY: get_qs_kind_set, &
                                               qs_kind_type
    USE simpar_types,                    ONLY: simpar_type
-   USE subsys_types,                    ONLY: subsys_type
    USE external_potential_types,        ONLY: get_potential, &
                                               gth_potential_type, &
-                                              set_gth_potential
+                                              set_potential
    USE thermopotentiostat_types,        ONLY: thermopotentiostat_type, &
                                               thermopotentiostat_create, &
                                               thermopotentiostat_release
@@ -224,7 +223,7 @@ CONTAINS
          thermo_pot%current_zeff_corr = new_zeff_corr
 
       ELSE
-         CPWARN("THERMOPOTENTIOSTAT: Dipole moment not available. Enable DFT%PRINT%MOMENTS")
+         CPWARN("THERMOPOTENTIOSTAT: Dipole not available. Enable MOMENTS")
       END IF
 
       CALL timestop(handle)
@@ -283,11 +282,11 @@ CONTAINS
          cerf_ppl = ccore_charge  ! Same formula for error function coefficient
 
          ! Set the updated values on the potential
-         CALL set_gth_potential(gth_potential, &
-                                zeff=new_zeff, &
-                                zeff_correction=zeff_corr, &
-                                ccore_charge=ccore_charge, &
-                                cerf_ppl=cerf_ppl)
+         CALL set_potential(gth_potential, &
+                            zeff=new_zeff, &
+                            zeff_correction=zeff_corr, &
+                            ccore_charge=ccore_charge, &
+                            cerf_ppl=cerf_ppl)
 
       END IF
 
