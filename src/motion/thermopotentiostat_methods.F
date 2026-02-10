@@ -62,6 +62,7 @@ MODULE thermopotentiostat_methods
                                               qs_environment_type
    USE qs_kind_types,                   ONLY: get_qs_kind_set, &
                                               qs_kind_type
+   USE cp_control_types,                ONLY: dft_control_type
    USE simpar_types,                    ONLY: simpar_type
    USE external_potential_types,        ONLY: get_potential, &
                                               gth_potential_type, &
@@ -99,15 +100,16 @@ CONTAINS
 
       CHARACTER(LEN=default_string_length)               :: element_symbol
       INTEGER                                            :: direction, ikind, nkind
-      LOGICAL                                            :: use_integral_control
+      LOGICAL                                            :: use_integral_control, element_found
       REAL(dp)                                           :: coupling_strength, integral_gain, &
                                                             max_zeff_correction, min_zeff_correction, &
                                                             target_dipole, zeff_correction
+      TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(gth_potential_type), POINTER                  :: gth_potential
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(section_vals_type), POINTER                   :: thermo_section
 
-      NULLIFY (thermo_section, qs_kind_set, gth_potential)
+      NULLIFY (thermo_section, qs_kind_set, gth_potential, dft_control)
 
       thermo_section => section_vals_get_subs_vals(md_section, "THERMOPOTENTIOSTAT")
 
@@ -132,24 +134,38 @@ CONTAINS
                                      min_zeff_correction, use_integral_control, integral_gain)
 
       ! Find the atom kind index for the specified element
-      CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set)
+      CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set, dft_control=dft_control)
       nkind = SIZE(qs_kind_set)
 
+      ! Enable CORE_CORR_DIP automatically for thermopotentiostat
+      ! This is required for electron density to respond to zeff_correction changes
+      ! Note: SURFACE_DIPOLE_CORRECTION is already validated in md_run.F
+      IF (.NOT. dft_control%correct_el_density_dip) THEN
+         dft_control%correct_el_density_dip = .TRUE.
+         CPWARN("THERMOPOTENTIOSTAT: Auto-enabling CORE_CORR_DIP")
+      END IF
+
+      element_found = .FALSE.
       DO ikind = 1, nkind
          IF (TRIM(qs_kind_set(ikind)%element_symbol) == TRIM(element_symbol)) THEN
+            element_found = .TRUE.
             thermo_pot%atom_kind_index = ikind
-            ! Get initial zeff_correction if any
-            IF (ASSOCIATED(qs_kind_set(ikind)%gth_potential)) THEN
-               CALL get_potential(potential=qs_kind_set(ikind)%gth_potential, &
-                                  zeff_correction=zeff_correction)
-               thermo_pot%initial_zeff_corr = zeff_correction
-               thermo_pot%current_zeff_corr = zeff_correction
+            ! Check that GTH potential is available
+            IF (.NOT. ASSOCIATED(qs_kind_set(ikind)%gth_potential)) THEN
+               CALL cp_abort(__LOCATION__, &
+                             "THERMOPOTENTIOSTAT: Element "//TRIM(element_symbol)// &
+                             " must have a GTH potential for zeff_correction to work")
             END IF
+            ! Get initial zeff_correction
+            CALL get_potential(potential=qs_kind_set(ikind)%gth_potential, &
+                               zeff_correction=zeff_correction)
+            thermo_pot%initial_zeff_corr = zeff_correction
+            thermo_pot%current_zeff_corr = zeff_correction
             EXIT
          END IF
       END DO
 
-      IF (thermo_pot%atom_kind_index < 0) THEN
+      IF (.NOT. element_found) THEN
          CALL cp_abort(__LOCATION__, &
                        "THERMOPOTENTIOSTAT: Element "//TRIM(element_symbol)//" not found in system")
       END IF

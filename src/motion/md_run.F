@@ -40,7 +40,9 @@ MODULE md_run
    USE input_constants,                 ONLY: &
         ehrenfest, langevin_ensemble, npe_f_ensemble, npe_i_ensemble, &
         nph_uniaxial_damped_ensemble, nph_uniaxial_ensemble, npt_f_ensemble, npt_i_ensemble, &
-        npt_ia_ensemble, reftraj_ensemble
+        npt_ia_ensemble, reftraj_ensemble, thermopotentiostat_ensemble
+   USE cp_control_types,                ONLY: dft_control_type
+   USE qs_environment_types,            ONLY: get_qs_env
    USE input_cp2k_check,                ONLY: remove_restart_info
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_remove_values,&
@@ -344,6 +346,20 @@ CONTAINS
                           "Virial evaluation not requested for all the force_eval sections present in"// &
                           " the input file! You have to switch on the virial evaluation with the keyword: STRESS_TENSOR"// &
                           " in each force_eval section. Be sure the method you are using can compute the virial!")
+      END IF
+
+      ! Check for thermopotentiostat ensemble - requires SURFACE_DIPOLE_CORRECTION
+      IF (simpar%ensemble == thermopotentiostat_ensemble) THEN
+         IF (.NOT. ASSOCIATED(force_env%qs_env)) &
+            CALL cp_abort(__LOCATION__, &
+                          "THERMOPOTENTIOSTAT ensemble requires Quickstep (QS) method")
+         BLOCK
+            TYPE(dft_control_type), POINTER :: dft_control
+            CALL get_qs_env(force_env%qs_env, dft_control=dft_control)
+            IF (.NOT. dft_control%correct_surf_dip) &
+               CALL cp_abort(__LOCATION__, &
+                             "THERMOPOTENTIOSTAT requires SURFACE_DIPOLE_CORRECTION")
+         END BLOCK
       END IF
 
       ! Computing Forces at zero MD step

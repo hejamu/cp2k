@@ -113,14 +113,16 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief Release a thermopotentiostat structure
 !> \param thermo_pot the thermopotentiostat to release
+!> \note The caller is responsible for deallocating the structure after this call
 ! **************************************************************************************************
    SUBROUTINE thermopotentiostat_release(thermo_pot)
 
       TYPE(thermopotentiostat_type), POINTER             :: thermo_pot
 
-      IF (ASSOCIATED(thermo_pot)) THEN
-         DEALLOCATE (thermo_pot)
-      END IF
+      ! No internal pointers to clean up
+      ! Deallocation is handled by the caller (consistent with other release routines)
+      ! Do not NULLIFY here - that would prevent the caller from deallocating
+      MARK_USED(thermo_pot)
 
    END SUBROUTINE thermopotentiostat_release
 
