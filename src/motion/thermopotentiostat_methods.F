@@ -60,13 +60,15 @@ MODULE thermopotentiostat_methods
                                               rng_stream_type
    USE particle_list_types,             ONLY: particle_list_type
    USE particle_types,                  ONLY: particle_type
-   USE physcon,                         ONLY: debye
+   USE physcon,                         ONLY: debye, &
+                                              kelvin
    USE qs_environment_types,            ONLY: get_qs_env, &
                                               qs_environment_type
    USE qs_kind_types,                   ONLY: get_qs_kind_set, &
                                               qs_kind_type
    USE cp_control_types,                ONLY: dft_control_type
    USE simpar_types,                    ONLY: simpar_type
+   USE cell_types,                      ONLY: cell_type
    USE external_potential_types,        ONLY: get_potential, &
                                               gth_potential_type, &
                                               set_potential
@@ -186,36 +188,57 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief Update the thermopotentiostat based on current dipole moment
 !>        This is called at each MD step to adjust zeff_correction
+!>        The potential is calculated from the dipole: V = -4*pi*dipole/area
+!>        Dissipative term: C * (V - V_target) * (1 - exp(-dt/tau))
+!>        Fluctuation term: N * sqrt(k_B * T * C * (1 - exp(-2*dt/tau)))
 !> \param thermo_pot the thermopotentiostat structure
 !> \param qs_env the QS environment
 !> \param dt the timestep
+!> \param temperature the temperature in Kelvin
 !> \param dipole_moment output: the current dipole moment
 !> \param dipole_available output: whether dipole was available
 ! **************************************************************************************************
-   SUBROUTINE thermopotentiostat_update(thermo_pot, qs_env, dt, dipole_moment, dipole_available)
+   SUBROUTINE thermopotentiostat_update(thermo_pot, qs_env, dt, temperature, dipole_moment, dipole_available)
 
       TYPE(thermopotentiostat_type), INTENT(INOUT)       :: thermo_pot
       TYPE(qs_environment_type), POINTER                 :: qs_env
       REAL(dp), INTENT(IN)                               :: dt
+      REAL(dp), INTENT(IN)                               :: temperature
       REAL(dp), DIMENSION(3), INTENT(OUT)                :: dipole_moment
       LOGICAL, INTENT(OUT)                               :: dipole_available
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'thermopotentiostat_update'
       CHARACTER(LEN=default_string_length)               :: description
 
-      INTEGER                                            :: handle
-      REAL(dp)                                           :: delta_zeff, potential_error, &
-                                                            new_zeff_corr
+      INTEGER                                            :: handle, dir
+      REAL(dp)                                           :: area, current_potential, &
+                                                            dissipative_term, exp_factor, &
+                                                            exp_factor_2, fluctuation_term, &
+                                                            k_B_T, new_zeff_corr, random_number
+      TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_result_type), POINTER                      :: results
 
       CALL timeset(routineN, handle)
 
-      NULLIFY (results)
+      NULLIFY (results, cell)
       dipole_moment = 0.0_dp
       dipole_available = .FALSE.
 
-      ! Get the dipole moment from results
-      CALL get_qs_env(qs_env, results=results)
+      ! Get the cell to calculate surface area
+      CALL get_qs_env(qs_env, cell=cell, results=results)
+
+      ! Calculate surface area perpendicular to dipole direction
+      ! For orthorhombic cells: area = product of two perpendicular cell dimensions
+      dir = thermo_pot%direction
+      SELECT CASE (dir)
+      CASE (1)  ! X direction: area = Y * Z
+         area = cell%hmat(2, 2) * cell%hmat(3, 3)
+      CASE (2)  ! Y direction: area = X * Z
+         area = cell%hmat(1, 1) * cell%hmat(3, 3)
+      CASE (3)  ! Z direction: area = X * Y
+         area = cell%hmat(1, 1) * cell%hmat(2, 2)
+      END SELECT
+
       description = "[DIPOLE]"
 
       IF (test_for_result(results, description=description)) THEN
@@ -225,16 +248,39 @@ CONTAINS
          ! Store last dipole for output
          thermo_pot%last_dipole = dipole_moment
 
-         ! Calculate the potential error (deviation from target potential)
-         ! The dipole is used to compute the effective potential
-         potential_error = dipole_moment(thermo_pot%direction) - thermo_pot%target_potential
+         ! Calculate current potential from dipole: V = -4*pi*dipole/area
+         current_potential = -4.0_dp * pi * dipole_moment(dir) / area
 
-         ! Calculate change in zeff based on geometric capacitance and time constant
-         ! The RNG stream is available for stochastic dynamics: thermo_pot%rng_stream%next()
-         delta_zeff = thermo_pot%geometric_capacitance * potential_error * dt
+         ! Calculate exponential factors for Langevin dynamics
+         ! exp_factor = 1 - exp(-dt/tau)
+         ! exp_factor_2 = 1 - exp(-2*dt/tau)
+         IF (thermo_pot%timecon > 0.0_dp) THEN
+            exp_factor = 1.0_dp - EXP(-dt / thermo_pot%timecon)
+            exp_factor_2 = 1.0_dp - EXP(-2.0_dp * dt / thermo_pot%timecon)
+         ELSE
+            ! Instantaneous response if timecon is zero
+            exp_factor = 1.0_dp
+            exp_factor_2 = 1.0_dp
+         END IF
 
-         ! Update zeff_correction with limits
-         new_zeff_corr = thermo_pot%current_zeff_corr + delta_zeff
+         ! Dissipative term: C * (V_current - V_target) * (1 - exp(-dt/tau))
+         dissipative_term = thermo_pot%geometric_capacitance * &
+                            (current_potential - thermo_pot%target_potential) * exp_factor
+
+         ! Fluctuation term: N * sqrt(k_B * T * C * (1 - exp(-2*dt/tau)))
+         ! k_B * T in atomic units: temperature / kelvin (since kelvin = a.u.->K)
+         k_B_T = temperature / kelvin
+         random_number = thermo_pot%rng_stream%next()
+         fluctuation_term = random_number * &
+                            SQRT(k_B_T * thermo_pot%geometric_capacitance * exp_factor_2)
+
+         ! Store values for output
+         thermo_pot%last_current_potential = current_potential
+         thermo_pot%last_dissipative_term = dissipative_term
+         thermo_pot%last_fluctuation_term = fluctuation_term
+
+         ! Update zeff_correction with dissipative and fluctuation contributions
+         new_zeff_corr = thermo_pot%current_zeff_corr + dissipative_term + fluctuation_term
          new_zeff_corr = MIN(new_zeff_corr, thermo_pot%max_zeff_correction)
          new_zeff_corr = MAX(new_zeff_corr, thermo_pot%min_zeff_correction)
 
@@ -351,14 +397,15 @@ CONTAINS
       IF (iw > 0) THEN
          IF (new_file) THEN
             ! Write header
-            WRITE (iw, '("#",5X,A,10X,A,8X,A,8X,A,8X,A,8X,A)') &
-               "Step Nr.", "Time[fs]", "Dipole_X[a.u.]", "Dipole_Y[a.u.]", &
-               "Dipole_Z[a.u.]", "Zeff_Corr[a.u.]"
+            WRITE (iw, '("#",5X,A,10X,A,10X,A,10X,A,12X,A,12X,A)') &
+               "Step Nr.", "Time[fs]", "Current_Pot[a.u.]", "Zeff_Corr[a.u.]", &
+               "Dissipative[a.u.]", "Fluctuation[a.u.]"
          END IF
          WRITE (iw, "(I10,F20.6,F20.9,F20.9,F20.9,F20.9)") &
-            itimes, time, thermopotentiostat%last_dipole(1), &
-            thermopotentiostat%last_dipole(2), thermopotentiostat%last_dipole(3), &
-            thermopotentiostat%current_zeff_corr
+            itimes, time, thermopotentiostat%last_current_potential, &
+            thermopotentiostat%current_zeff_corr, &
+            thermopotentiostat%last_dissipative_term, &
+            thermopotentiostat%last_fluctuation_term
          CALL m_flush(iw)
       END IF
       CALL cp_print_key_finished_output(iw, logger, motion_section, "MD%PRINT%THERMOPOTENTIOSTAT")
@@ -368,14 +415,18 @@ CONTAINS
                                 extension=".mdLog", file_position=my_pos, file_action=my_act)
       IF (iw > 0) THEN
          WRITE (iw, '(/,T2,A)') "THERMOPOTENTIOSTAT| Status:"
-         WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Current dipole (target dir.)  [a.u.]:", &
-            thermopotentiostat%last_dipole(thermopotentiostat%direction)
+         WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Current potential             [a.u.]:", &
+            thermopotentiostat%last_current_potential
          WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Target potential              [a.u.]:", &
             thermopotentiostat%target_potential
          WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Potential error               [a.u.]:", &
-            thermopotentiostat%last_dipole(thermopotentiostat%direction) - thermopotentiostat%target_potential
+            thermopotentiostat%last_current_potential - thermopotentiostat%target_potential
          WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Current zeff correction       [a.u.]:", &
             thermopotentiostat%current_zeff_corr
+         WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Dissipative dN                [a.u.]:", &
+            thermopotentiostat%last_dissipative_term
+         WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Fluctuation dN                [a.u.]:", &
+            thermopotentiostat%last_fluctuation_term
       END IF
       CALL cp_print_key_finished_output(iw, logger, motion_section, "MD%PRINT%PROGRAM_RUN_INFO")
 

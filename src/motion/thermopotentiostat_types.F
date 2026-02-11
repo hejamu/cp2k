@@ -58,6 +58,12 @@ MODULE thermopotentiostat_types
       REAL(dp)                              :: initial_zeff_corr = 0.0_dp
       ! Last measured dipole moment for output
       REAL(dp), DIMENSION(3)                :: last_dipole = [0.0_dp, 0.0_dp, 0.0_dp]
+      ! Last calculated current potential for output
+      REAL(dp)                              :: last_current_potential = 0.0_dp
+      ! Last dissipative term (change in electron count) for output
+      REAL(dp)                              :: last_dissipative_term = 0.0_dp
+      ! Last fluctuation term (change in electron count) for output
+      REAL(dp)                              :: last_fluctuation_term = 0.0_dp
       ! Flag indicating if thermopotentiostat is active
       LOGICAL                               :: active = .FALSE.
       ! Random number generator for stochastic dynamics

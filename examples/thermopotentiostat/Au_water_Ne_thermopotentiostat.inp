@@ -13,7 +13,7 @@
     CHARGE 0
     
     &MGRID
-      CUTOFF 400
+      CUTOFF 200
       REL_CUTOFF 60
     &END MGRID
     
@@ -23,12 +23,12 @@
     
     &SCF
       SCF_GUESS RESTART
-      EPS_SCF 1.0E-6
+      EPS_SCF 1.0E-5
       MAX_SCF 30
       &OUTER_SCF
         ! More outer SCF iterations for surface dipole to equilibrate
         MAX_SCF 30
-        EPS_SCF 1.0E-6
+        EPS_SCF 1.0E-5
       &END OUTER_SCF
       &DIAGONALIZATION
         ALGORITHM STANDARD
