@@ -435,20 +435,6 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-      CALL keyword_create(keyword, __LOCATION__, name="MAX_ZEFF_CORRECTION", &
-                          description="Maximum allowed positive zeff_correction value. "// &
-                          "Limits the range of the feedback control.", &
-                          usage="MAX_ZEFF_CORRECTION 1.0", default_r_val=1.0_dp)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, __LOCATION__, name="MIN_ZEFF_CORRECTION", &
-                          description="Minimum allowed (most negative) zeff_correction value. "// &
-                          "Limits the range of the feedback control.", &
-                          usage="MIN_ZEFF_CORRECTION -1.0", default_r_val=-1.0_dp)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
    END SUBROUTINE create_thermopotentiostat_section
 
 ! **************************************************************************************************

@@ -111,7 +111,6 @@ CONTAINS
       INTEGER                                            :: direction, ikind, nkind
       LOGICAL                                            :: element_found
       REAL(dp)                                           :: geometric_capacitance, &
-                                                            max_zeff_correction, min_zeff_correction, &
                                                             target_potential, timecon, zeff_correction
       REAL(dp), DIMENSION(3, 2)                          :: initial_seed
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -129,8 +128,6 @@ CONTAINS
       CALL section_vals_val_get(thermo_section, "GEOMETRIC_CAPACITANCE", r_val=geometric_capacitance)
       CALL section_vals_val_get(thermo_section, "TIMECON", r_val=timecon)
       CALL section_vals_val_get(thermo_section, "ELEMENT", c_val=element_symbol)
-      CALL section_vals_val_get(thermo_section, "MAX_ZEFF_CORRECTION", r_val=max_zeff_correction)
-      CALL section_vals_val_get(thermo_section, "MIN_ZEFF_CORRECTION", r_val=min_zeff_correction)
 
       ! Check that element was specified
       IF (LEN_TRIM(element_symbol) == 0) THEN
@@ -139,8 +136,7 @@ CONTAINS
 
       ! Create the thermopotentiostat structure
       CALL thermopotentiostat_create(thermo_pot, target_potential, geometric_capacitance, &
-                                     timecon, direction, element_symbol, max_zeff_correction, &
-                                     min_zeff_correction)
+                                     timecon, direction, element_symbol)
 
       ! Initialize random number generator for stochastic dynamics
       initial_seed = next_rng_seed()
@@ -248,7 +244,7 @@ CONTAINS
       thermo_pot%last_dipole = dipole_moment
 
       ! Calculate current potential from dipole: V = -4*pi*dipole / area
-      current_potential = - 1.0_dp * pi * dipole_moment / area
+      current_potential = - 4.0_dp * pi * dipole_moment / area
 
       ! Calculate exponential factors for Langevin dynamics
       ! exp_factor = 1 - exp(-dt/tau)
@@ -263,7 +259,7 @@ CONTAINS
       END IF
 
       ! Dissipative term: C * (V_current - V_target) * (1 - exp(-dt/tau))
-      dissipative_term = thermo_pot%geometric_capacitance * &
+      dissipative_term = - 1.0_dp * thermo_pot%geometric_capacitance * &
                            (current_potential - thermo_pot%target_potential) * exp_factor
 
       ! Fluctuation term: N * sqrt(k_B * T * C * (1 - exp(-2*dt/tau)))
@@ -280,8 +276,6 @@ CONTAINS
 
       ! Update zeff_correction with dissipative and fluctuation contributions
       new_zeff_corr = thermo_pot%current_zeff_corr + dissipative_term + fluctuation_term
-      new_zeff_corr = MIN(new_zeff_corr, thermo_pot%max_zeff_correction)
-      new_zeff_corr = MAX(new_zeff_corr, thermo_pot%min_zeff_correction)
 
       thermo_pot%current_zeff_corr = new_zeff_corr
 
@@ -405,9 +399,9 @@ CONTAINS
       IF (iw > 0) THEN
          IF (new_file) THEN
             ! Write header
-            WRITE (iw, '("#",5X,A,10X,A,10X,A,10X,A,12X,A,12X,A)') &
-               "Step Nr.", "Time[fs]", "Current_Pot[V]", "Zeff_Corr[a.u.]", &
-               "Dissipative[a.u.]", "Fluctuation[a.u.]"
+            WRITE (iw, '("#",5X,A,8X,A,8X,A,7X,A,8X,A,12X,A)') &
+               "Step Nr.", "Time[fs]", "Potential [V]", "Charge [a.u.]", &
+               "Disp [a.u.]", "Fluc [a.u.]"
          END IF
          WRITE (iw, "(I10,F20.6,F20.9,F20.9,F20.9,F20.9)") &
             itimes, time, thermopotentiostat%last_current_potential * evolt, &

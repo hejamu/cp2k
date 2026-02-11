@@ -44,10 +44,6 @@ MODULE thermopotentiostat_types
       REAL(dp)                              :: timecon = 0.0_dp
       ! Current zeff correction value being applied
       REAL(dp)                              :: current_zeff_corr = 0.0_dp
-      ! Maximum allowed zeff correction magnitude
-      REAL(dp)                              :: max_zeff_correction = 1.0_dp
-      ! Minimum allowed zeff correction magnitude
-      REAL(dp)                              :: min_zeff_correction = -1.0_dp
       ! Direction for dipole control: 1=x, 2=y, 3=z
       INTEGER                               :: direction = 3
       ! Index of the atom kind to modify
@@ -80,12 +76,9 @@ CONTAINS
 !> \param timecon time constant in atomic units
 !> \param direction dipole direction (1=x, 2=y, 3=z)
 !> \param element_symbol element symbol of atom kind to modify
-!> \param max_zeff_correction maximum allowed zeff correction
-!> \param min_zeff_correction minimum allowed zeff correction
 ! **************************************************************************************************
    SUBROUTINE thermopotentiostat_create(thermo_pot, target_potential, geometric_capacitance, &
-                                        timecon, direction, element_symbol, max_zeff_correction, &
-                                        min_zeff_correction)
+                                        timecon, direction, element_symbol)
 
       TYPE(thermopotentiostat_type), POINTER             :: thermo_pot
       REAL(dp), INTENT(IN)                               :: target_potential
@@ -93,8 +86,6 @@ CONTAINS
       REAL(dp), INTENT(IN)                               :: timecon
       INTEGER, INTENT(IN)                                :: direction
       CHARACTER(LEN=*), INTENT(IN)                       :: element_symbol
-      REAL(dp), INTENT(IN)                               :: max_zeff_correction
-      REAL(dp), INTENT(IN)                               :: min_zeff_correction
 
       CPASSERT(.NOT. ASSOCIATED(thermo_pot))
       ALLOCATE (thermo_pot)
@@ -104,8 +95,6 @@ CONTAINS
       thermo_pot%timecon = timecon
       thermo_pot%direction = direction
       thermo_pot%element_symbol = TRIM(element_symbol)
-      thermo_pot%max_zeff_correction = max_zeff_correction
-      thermo_pot%min_zeff_correction = min_zeff_correction
       thermo_pot%current_zeff_corr = 0.0_dp
       thermo_pot%active = .TRUE.
 
