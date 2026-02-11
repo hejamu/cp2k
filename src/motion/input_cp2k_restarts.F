@@ -81,6 +81,7 @@ MODULE input_cp2k_restarts
    USE thermostat_types,                ONLY: thermostat_type
    USE thermostat_utils,                ONLY: communication_thermo_low2,&
                                               get_kin_energies
+   USE thermopotentiostat_types,        ONLY: thermopotentiostat_type
 #include "../base/base_uses.f90"
 
    IMPLICIT NONE
@@ -529,11 +530,12 @@ CONTAINS
       TYPE(simpar_type), POINTER                         :: simpar
       TYPE(thermostat_type), POINTER                     :: thermostat_baro, thermostat_part, &
                                                             thermostat_shell
+      TYPE(thermopotentiostat_type), POINTER              :: thermo_pot
 
       CALL timeset(routineN, handle)
       NULLIFY (logger, thermostat_part, thermostat_baro, npt, para_env, nhc, &
                work_section, thermostat_shell, t, averages, constant, &
-               walkers_status, itimes, meta_env, simpar)
+               walkers_status, itimes, meta_env, simpar, thermo_pot)
       NULLIFY (particles)
       NULLIFY (subsys)
       IF (PRESENT(md_env)) THEN
@@ -541,6 +543,7 @@ CONTAINS
                          thermostat_part=thermostat_part, &
                          thermostat_baro=thermostat_baro, &
                          thermostat_shell=thermostat_shell, &
+                         thermopotentiostat=thermo_pot, &
                          npt=npt, &
                          t=t, &
                          constant=constant, &
@@ -762,6 +765,14 @@ CONTAINS
          END IF
       END IF
       CALL timestop(handle2)
+
+      ! THERMOPOTENTIOSTAT
+      IF (ASSOCIATED(thermo_pot)) THEN
+         IF (thermo_pot%active) THEN
+            CALL section_vals_val_set(motion_section, "MD%THERMOPOTENTIOSTAT%ELECTRODE_CHARGE", &
+                                      r_val=thermo_pot%current_zeff_corr)
+         END IF
+      END IF
 
       CALL timeset(routineN//"_META", handle2)
       IF (ASSOCIATED(meta_env)) THEN

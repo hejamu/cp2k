@@ -110,7 +110,7 @@ CONTAINS
       CHARACTER(LEN=default_string_length)               :: element_symbol
       INTEGER                                            :: direction, ikind, nkind
       LOGICAL                                            :: element_found
-      REAL(dp)                                           :: geometric_capacitance, &
+      REAL(dp)                                           :: electrode_charge, geometric_capacitance, &
                                                             target_potential, timecon, zeff_correction
       REAL(dp), DIMENSION(3, 2)                          :: initial_seed
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -128,6 +128,7 @@ CONTAINS
       CALL section_vals_val_get(thermo_section, "GEOMETRIC_CAPACITANCE", r_val=geometric_capacitance)
       CALL section_vals_val_get(thermo_section, "TIMECON", r_val=timecon)
       CALL section_vals_val_get(thermo_section, "ELEMENT", c_val=element_symbol)
+      CALL section_vals_val_get(thermo_section, "ELECTRODE_CHARGE", r_val=electrode_charge)
 
       ! Check that element was specified
       IF (LEN_TRIM(element_symbol) == 0) THEN
@@ -180,6 +181,13 @@ CONTAINS
       IF (.NOT. element_found) THEN
          CALL cp_abort(__LOCATION__, &
                        "THERMOPOTENTIOSTAT: Element "//TRIM(element_symbol)//" not found in system")
+      END IF
+
+      ! On restart, override current_zeff_corr with saved electrode charge
+      ! and apply the correction to the GTH potential before the first force calculation
+      IF (ABS(electrode_charge) > 0.0_dp) THEN
+         thermo_pot%current_zeff_corr = electrode_charge
+         CALL update_zeff_correction_for_dipole(thermo_pot, qs_env)
       END IF
 
    END SUBROUTINE thermopotentiostat_init

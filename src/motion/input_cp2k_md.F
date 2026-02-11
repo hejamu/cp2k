@@ -435,6 +435,16 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, __LOCATION__, name="ELECTRODE_CHARGE", &
+                          description="Total electrode charge (zeff_correction) to apply on restart. "// &
+                          "This value is written automatically by the restart mechanism and should "// &
+                          "not normally be set by hand. It stores the accumulated charge so that "// &
+                          "the core correction is preserved across restarts.", &
+                          usage="ELECTRODE_CHARGE 0.0", default_r_val=0.0_dp, &
+                          lone_keyword_r_val=0.0_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
    END SUBROUTINE create_thermopotentiostat_section
 
 ! **************************************************************************************************
