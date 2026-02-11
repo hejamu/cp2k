@@ -35,13 +35,13 @@
       &END DIAGONALIZATION
       &MIXING
         METHOD BROYDEN_MIXING
-        ALPHA 0.01
+        ALPHA 0.1
         BETA 0.5
         NBROYDEN 5
       &END MIXING
       &SMEAR
         METHOD FERMI_DIRAC
-        ELECTRONIC_TEMPERATURE 300
+        ELECTRONIC_TEMPERATURE 3000
       &END SMEAR
       ADDED_MOS -1
     &END SCF
@@ -63,7 +63,7 @@
     ! Enable dipole moment calculation - REQUIRED for thermopotentiostat
     &PRINT
       &MOMENTS ON
-        PERIODIC FALSE
+        PERIODIC TRUE
         REFERENCE COM
       &END MOMENTS
     &END PRINT
@@ -113,7 +113,7 @@
 &MOTION
   &MD
     ENSEMBLE THERMOPOTENTIOSTAT
-    TIMESTEP 0.5
+    TIMESTEP 1.0
     STEPS 10000
     TEMPERATURE 300.0
     
@@ -123,14 +123,14 @@
     &THERMOPOTENTIOSTAT
       ! Target potential in Volts
       ! 0.0 means zero net charge transfer / potential of zero charge
-      TARGET_POTENTIAL 0.0
+      TARGET_POTENTIAL 4.0
       
       ! Direction perpendicular to electrode surface
       DIPOLE_DIRECTION Z
       
       ! Geometric capacitance in attofarads - controls response speed
       ! Larger values = faster but may oscillate
-      GEOMETRIC_CAPACITANCE 0.05
+      GEOMETRIC_CAPACITANCE 1.335 ! a.u.
       
       ! Time constant for thermopotentiostat response in femtoseconds
       TIMECON 100.0
@@ -167,10 +167,18 @@
     
   &END MD
   
+  &CONSTRAINT
+    &FIXED_ATOMS
+      COMPONENTS_TO_FIX XYZ
+      LIST 1..32
+    &END FIXED_ATOMS
+  &END CONSTRAINT
+
   &PRINT
     &TRAJECTORY
+      FORMAT EXTXYZ
       &EACH
-        MD 10
+        MD 1
       &END EACH
     &END TRAJECTORY
     &VELOCITIES OFF
