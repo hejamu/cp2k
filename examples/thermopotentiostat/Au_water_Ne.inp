@@ -1,0 +1,95 @@
+&GLOBAL
+  PROJECT Au_water_Ne
+  RUN_TYPE ENERGY_FORCE
+  PRINT_LEVEL MEDIUM
+&END GLOBAL
+
+&FORCE_EVAL
+  METHOD Quickstep
+  &DFT
+    BASIS_SET_FILE_NAME BASIS_MOLOPT
+    POTENTIAL_FILE_NAME GTH_POTENTIALS
+    CHARGE 0
+    
+    &MGRID
+      CUTOFF 400
+      REL_CUTOFF 60
+    &END MGRID
+    
+    &QS
+      EPS_DEFAULT 1.0E-12
+    &END QS
+    
+    &SCF
+      SCF_GUESS RESTART
+      EPS_SCF 1.0E-6
+      MAX_SCF 30
+      ADDED_MOS -1
+      &DIAGONALIZATION
+        ALGORITHM STANDARD
+      &END DIAGONALIZATION
+      &SMEAR
+        METHOD FERMI_DIRAC
+        ELECTRONIC_TEMPERATURE 3000
+      &END SMEAR
+      &MIXING
+        METHOD BROYDEN_MIXING
+        ALPHA 0.01
+        BETA 0.5
+        NBROYDEN 5
+      &END MIXING
+!      &OT 
+!        PRECONDITIONER FULL_ALL
+!        MINIMIZER DIIS
+!        ENERGY_GAP 0.1
+!      &END OT
+      &OUTER_SCF
+        ! More outer SCF iterations for surface dipole to equilibrate
+        MAX_SCF 30
+        EPS_SCF 1.0E-6
+      &END OUTER_SCF
+    &END SCF
+    
+    &XC
+      &XC_FUNCTIONAL PBE
+      &END XC_FUNCTIONAL
+    &END XC
+  &END DFT
+  
+  &SUBSYS
+    &CELL
+      ABC 11.5400   11.5400   35.0000
+      PERIODIC XYZ
+    &END CELL
+    
+    &TOPOLOGY
+      COORD_FILE_FORMAT XYZ
+      COORD_FILE_NAME solvated_slab.xyz
+    &END TOPOLOGY
+    
+    ! Gold - working electrode (will be controlled by thermopotentiostat)
+    &KIND Au
+      BASIS_SET DZVP-MOLOPT-SR-GTH
+      POTENTIAL GTH-PBE-q11
+    &END KIND
+    
+    ! Neon - counter electrode material
+    &KIND Ne
+      BASIS_SET DZVP-MOLOPT-SR-GTH
+      POTENTIAL GTH-PBE-q8
+    &END KIND
+    
+    ! Oxygen
+    &KIND O
+      BASIS_SET DZVP-MOLOPT-GTH
+      POTENTIAL GTH-PBE-q6
+    &END KIND
+    
+    ! Hydrogen
+    &KIND H
+      BASIS_SET DZVP-MOLOPT-GTH
+      POTENTIAL GTH-PBE-q1
+    &END KIND
+    
+  &END SUBSYS
+&END FORCE_EVAL

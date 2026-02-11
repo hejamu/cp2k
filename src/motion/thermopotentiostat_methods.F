@@ -55,6 +55,9 @@ MODULE thermopotentiostat_methods
    USE molecule_list_types,             ONLY: molecule_list_type
    USE molecule_types,                  ONLY: global_constraint_type, &
                                               molecule_type
+   USE parallel_rng_types,              ONLY: GAUSSIAN, &
+                                              next_rng_seed, &
+                                              rng_stream_type
    USE particle_list_types,             ONLY: particle_list_type
    USE particle_types,                  ONLY: particle_type
    USE physcon,                         ONLY: debye
@@ -98,12 +101,14 @@ CONTAINS
       TYPE(section_vals_type), POINTER                   :: md_section
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
+      CHARACTER(LEN=40)                                  :: rng_name
       CHARACTER(LEN=default_string_length)               :: element_symbol
       INTEGER                                            :: direction, ikind, nkind
-      LOGICAL                                            :: use_integral_control, element_found
-      REAL(dp)                                           :: coupling_strength, integral_gain, &
+      LOGICAL                                            :: element_found
+      REAL(dp)                                           :: geometric_capacitance, &
                                                             max_zeff_correction, min_zeff_correction, &
-                                                            target_dipole, zeff_correction
+                                                            target_potential, timecon, zeff_correction
+      REAL(dp), DIMENSION(3, 2)                          :: initial_seed
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(gth_potential_type), POINTER                  :: gth_potential
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
@@ -114,14 +119,13 @@ CONTAINS
       thermo_section => section_vals_get_subs_vals(md_section, "THERMOPOTENTIOSTAT")
 
       ! Read input parameters
-      CALL section_vals_val_get(thermo_section, "TARGET_DIPOLE", r_val=target_dipole)
+      CALL section_vals_val_get(thermo_section, "TARGET_POTENTIAL", r_val=target_potential)
       CALL section_vals_val_get(thermo_section, "DIPOLE_DIRECTION", i_val=direction)
-      CALL section_vals_val_get(thermo_section, "COUPLING_STRENGTH", r_val=coupling_strength)
+      CALL section_vals_val_get(thermo_section, "GEOMETRIC_CAPACITANCE", r_val=geometric_capacitance)
+      CALL section_vals_val_get(thermo_section, "TIMECON", r_val=timecon)
       CALL section_vals_val_get(thermo_section, "ELEMENT", c_val=element_symbol)
       CALL section_vals_val_get(thermo_section, "MAX_ZEFF_CORRECTION", r_val=max_zeff_correction)
       CALL section_vals_val_get(thermo_section, "MIN_ZEFF_CORRECTION", r_val=min_zeff_correction)
-      CALL section_vals_val_get(thermo_section, "USE_INTEGRAL_CONTROL", l_val=use_integral_control)
-      CALL section_vals_val_get(thermo_section, "INTEGRAL_GAIN", r_val=integral_gain)
 
       ! Check that element was specified
       IF (LEN_TRIM(element_symbol) == 0) THEN
@@ -129,9 +133,16 @@ CONTAINS
       END IF
 
       ! Create the thermopotentiostat structure
-      CALL thermopotentiostat_create(thermo_pot, target_dipole, coupling_strength, &
-                                     direction, element_symbol, max_zeff_correction, &
-                                     min_zeff_correction, use_integral_control, integral_gain)
+      CALL thermopotentiostat_create(thermo_pot, target_potential, geometric_capacitance, &
+                                     timecon, direction, element_symbol, max_zeff_correction, &
+                                     min_zeff_correction)
+
+      ! Initialize random number generator for stochastic dynamics
+      initial_seed = next_rng_seed()
+      WRITE (UNIT=rng_name, FMT="(A)") "Thermopotentiostat RNG"
+      thermo_pot%rng_stream = rng_stream_type( &
+                              name=rng_name, distribution_type=GAUSSIAN, &
+                              extended_precision=.TRUE., seed=initial_seed)
 
       ! Find the atom kind index for the specified element
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set, dft_control=dft_control)
@@ -193,9 +204,8 @@ CONTAINS
       CHARACTER(LEN=default_string_length)               :: description
 
       INTEGER                                            :: handle
-      REAL(dp)                                           :: delta_zeff, dipole_error, &
-                                                            new_zeff_corr, proportional_term, &
-                                                            integral_term
+      REAL(dp)                                           :: delta_zeff, potential_error, &
+                                                            new_zeff_corr
       TYPE(cp_result_type), POINTER                      :: results
 
       CALL timeset(routineN, handle)
@@ -215,21 +225,13 @@ CONTAINS
          ! Store last dipole for output
          thermo_pot%last_dipole = dipole_moment
 
-         ! Calculate the error (deviation from target)
-         dipole_error = dipole_moment(thermo_pot%direction) - thermo_pot%target_dipole
+         ! Calculate the potential error (deviation from target potential)
+         ! The dipole is used to compute the effective potential
+         potential_error = dipole_moment(thermo_pot%direction) - thermo_pot%target_potential
 
-         ! Proportional control term
-         proportional_term = thermo_pot%coupling_strength * dipole_error
-
-         ! Integral control term (if enabled)
-         integral_term = 0.0_dp
-         IF (thermo_pot%use_integral_control) THEN
-            thermo_pot%integral_error = thermo_pot%integral_error + dipole_error * dt
-            integral_term = thermo_pot%integral_gain * thermo_pot%integral_error
-         END IF
-
-         ! Total change in zeff_correction
-         delta_zeff = (proportional_term + integral_term) * dt
+         ! Calculate change in zeff based on geometric capacitance and time constant
+         ! The RNG stream is available for stochastic dynamics: thermo_pot%rng_stream%next()
+         delta_zeff = thermo_pot%geometric_capacitance * potential_error * dt
 
          ! Update zeff_correction with limits
          new_zeff_corr = thermo_pot%current_zeff_corr + delta_zeff
@@ -368,10 +370,10 @@ CONTAINS
          WRITE (iw, '(/,T2,A)') "THERMOPOTENTIOSTAT| Status:"
          WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Current dipole (target dir.)  [a.u.]:", &
             thermopotentiostat%last_dipole(thermopotentiostat%direction)
-         WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Target dipole                 [a.u.]:", &
-            thermopotentiostat%target_dipole
-         WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Dipole error                  [a.u.]:", &
-            thermopotentiostat%last_dipole(thermopotentiostat%direction) - thermopotentiostat%target_dipole
+         WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Target potential              [a.u.]:", &
+            thermopotentiostat%target_potential
+         WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Potential error               [a.u.]:", &
+            thermopotentiostat%last_dipole(thermopotentiostat%direction) - thermopotentiostat%target_potential
          WRITE (iw, '(T2,A,T61,F20.9)') "THERMOPOTENTIOSTAT| Current zeff correction       [a.u.]:", &
             thermopotentiostat%current_zeff_corr
       END IF

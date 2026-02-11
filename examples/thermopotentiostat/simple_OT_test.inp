@@ -14,6 +14,7 @@
     ! Surface dipole correction - REQUIRED for thermopotentiostat
     SURFACE_DIPOLE_CORRECTION .TRUE.
     SURF_DIP_DIR Z
+    ! CORE_CORR_DIP is now automatically enabled by the thermopotentiostat
     
     &MGRID
       CUTOFF 200
@@ -73,10 +74,7 @@
     &KIND O
       BASIS_SET DZVP-MOLOPT-GTH
       POTENTIAL GTH-PBE-q6
-      ! Core correction for thermopotentiostat
-      &POTENTIAL
-        CORE_CORRECTION 0.0
-      &END POTENTIAL
+      ! CORE_CORRECTION is optional - thermopotentiostat dynamically sets zeff_correction
     &END KIND
     
     &KIND H
@@ -95,13 +93,13 @@
     TEMPERATURE 300.0
     
     &THERMOPOTENTIOSTAT
-      TARGET_DIPOLE 0.0
+      TARGET_POTENTIAL 0.0
       DIPOLE_DIRECTION Z
-      COUPLING_STRENGTH 0.01
+      GEOMETRIC_CAPACITANCE 0.01
+      TIMECON 100.0
       ELEMENT O
       MAX_ZEFF_CORRECTION 0.1
       MIN_ZEFF_CORRECTION -0.1
-      USE_INTEGRAL_CONTROL .FALSE.
     &END THERMOPOTENTIOSTAT
     
     &PRINT

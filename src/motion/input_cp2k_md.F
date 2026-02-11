@@ -389,14 +389,15 @@ CONTAINS
                           "The method adjusts the electron density according to the applied core correction "// &
                           "following the approach in PRL 120, 246801 (2018). "// &
                           "Requires DFT%PRINT%MOMENTS to be enabled for dipole calculation.", &
-                          n_keywords=8, n_subsections=0, repeats=.FALSE.)
+                          n_keywords=7, n_subsections=0, repeats=.FALSE.)
       NULLIFY (keyword)
 
-      CALL keyword_create(keyword, __LOCATION__, name="TARGET_DIPOLE", &
-                          description="The target dipole moment component in atomic units (e*bohr). "// &
-                          "The thermopotentiostat will adjust zeff_correction to drive the dipole "// &
-                          "towards this value.", &
-                          usage="TARGET_DIPOLE 0.0", default_r_val=0.0_dp)
+      CALL keyword_create(keyword, __LOCATION__, name="TARGET_POTENTIAL", &
+                          description="The target electrochemical potential in Volts. "// &
+                          "The thermopotentiostat will adjust zeff_correction to drive the system "// &
+                          "towards this potential value.", &
+                          usage="TARGET_POTENTIAL 0.0", default_r_val=0.0_dp, &
+                          unit_str="volt")
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -412,11 +413,18 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-      CALL keyword_create(keyword, __LOCATION__, name="COUPLING_STRENGTH", &
-                          description="The proportional feedback coupling strength (gain). "// &
-                          "Controls how strongly the zeff_correction responds to dipole deviations. "// &
+      CALL keyword_create(keyword, __LOCATION__, name="GEOMETRIC_CAPACITANCE", &
+                          description="The geometric capacitance of the system in attofarads (aF). "// &
+                          "Controls how strongly the zeff_correction responds to potential deviations. "// &
                           "Larger values give faster response but may cause oscillations.", &
-                          usage="COUPLING_STRENGTH 0.1", default_r_val=0.1_dp)
+                          usage="GEOMETRIC_CAPACITANCE 0.1", default_r_val=0.1_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="TIMECON", &
+                          description="The time constant for the thermopotentiostat response in femtoseconds.", &
+                          usage="TIMECON 100.0", default_r_val=cp_unit_to_cp2k(value=100.0_dp, unit_str="fs"), &
+                          unit_str="fs")
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -438,22 +446,6 @@ CONTAINS
                           description="Minimum allowed (most negative) zeff_correction value. "// &
                           "Limits the range of the feedback control.", &
                           usage="MIN_ZEFF_CORRECTION -1.0", default_r_val=-1.0_dp)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, __LOCATION__, name="USE_INTEGRAL_CONTROL", &
-                          description="Whether to use PI (proportional-integral) control instead "// &
-                          "of just proportional control. Integral control can eliminate steady-state "// &
-                          "errors but may cause overshoot.", &
-                          usage="USE_INTEGRAL_CONTROL .TRUE.", default_l_val=.FALSE., &
-                          lone_keyword_l_val=.TRUE.)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, __LOCATION__, name="INTEGRAL_GAIN", &
-                          description="The integral gain for PI control. Only used when "// &
-                          "USE_INTEGRAL_CONTROL is enabled.", &
-                          usage="INTEGRAL_GAIN 0.01", default_r_val=0.01_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
