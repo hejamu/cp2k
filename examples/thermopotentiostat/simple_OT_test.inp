@@ -113,12 +113,6 @@
           MD 1
         &END EACH
       &END ENERGY
-      &TRAJECTORY
-        &FORMAT EXTXYZ
-        &EACH
-          MD 1
-        &END EACH
-      &END TRAJECTORY
     &END PRINT
     
   &END MD
