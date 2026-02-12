@@ -67,8 +67,9 @@ CONTAINS
       INTEGER, DIMENSION(3)                              :: ngrid
       INTEGER, DIMENSION(:, :), POINTER                  :: bo
       REAL(dp)                                           :: cutoff, dh(3, 3), dip_fac, dip_hh, &
-                                                            dsurf, height_min, hh, pos_surf_dip, &
-                                                            rhoav_min, surfarea, vdip, vdip_fac
+                                                            dsurf, fieldpol_z, height_min, hh, &
+                                                            pos_surf_dip, rhoav_min, surfarea, &
+                                                            vdip, vdip_fac
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: rhoavsurf
       TYPE(cell_type), POINTER                           :: cell
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -233,6 +234,22 @@ CONTAINS
       DEALLOCATE (rhoavsurf)
 ! for printing purposes [SGh]
       qs_env%surface_dipole_moment = dip_hh/bohr
+
+!    Correct dip_hh for external electric field contribution.
+!    Only remove the artificial PBC potential step, not the physical field step.
+!    fieldpol_z follows CP2K convention: fieldpol = -E_physical.
+      fieldpol_z = 0.0_dp
+      IF (dft_control%apply_efield) THEN
+         fieldpol_z = dft_control%efield_fields(1)%efield%polarisation(idir_surfdip)* &
+                      dft_control%efield_fields(1)%efield%strength
+      ELSE IF (dft_control%apply_period_efield) THEN
+         fieldpol_z = -dft_control%period_efield%polarisation(idir_surfdip)/ &
+                      SQRT(DOT_PRODUCT(dft_control%period_efield%polarisation, &
+                                       dft_control%period_efield%polarisation))* &
+                      dft_control%period_efield%strength
+      END IF
+      dip_hh = dip_hh + fieldpol_z*cell%hmat(idir_surfdip, idir_surfdip)* &
+               surfarea/(4.0_dp*pi)
 
 !    Calculation of the dipole potential as a function of the perpendicular coordinate
       CALL pw_zero(vdip_r)
