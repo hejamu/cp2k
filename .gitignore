@@ -6,6 +6,7 @@
 /doxygen/
 /regtesting/
 /install/
+examples/
 
 # ignore former git submodules
 /tools/prettify/fprettify
