@@ -189,10 +189,10 @@ CONTAINS
 !>        10.2019 Added functionality to adjust mo occupation if the core
 !>                charges are changed via CORE_CORRECTION during surface dipole
 !>                calculation. Total number of electrons matches the total core
-!>                charges if tot_zeff_corr is non-zero. [Soumya Ghosh]
-!>        02.2026 Extended to support OT methods.
+!>                charges if tot_zeff_corr is non-zero. Not yet implemented for
+!>                OT type method. [Soumya Ghosh]
 !> \author  Matthias Krack (MK)
-!> \version 1.1
+!> \version 1.0
 ! **************************************************************************************************
    SUBROUTINE set_mo_occupation_2(mo_array, smear, eval_deriv, tot_zeff_corr, probe)
 
@@ -218,13 +218,8 @@ CONTAINS
          IF (PRESENT(probe)) THEN
             CALL set_mo_occupation_1(mo_array(1), smear=smear, probe=probe)
          ELSE IF (PRESENT(eval_deriv)) THEN
-! OT method with core correction: pass both eval_deriv and tot_zeff_corr
-            IF (PRESENT(tot_zeff_corr)) THEN
-               CALL set_mo_occupation_1(mo_array(1), smear=smear, eval_deriv=eval_deriv, &
-                                        tot_zeff_corr=tot_zeff_corr)
-            ELSE
-               CALL set_mo_occupation_1(mo_array(1), smear=smear, eval_deriv=eval_deriv)
-            END IF
+! Change of MO occupancy to account for CORE_CORRECTION is not yet implemented
+            CALL set_mo_occupation_1(mo_array(1), smear=smear, eval_deriv=eval_deriv)
          ELSE
             IF (PRESENT(tot_zeff_corr)) THEN
                CALL set_mo_occupation_1(mo_array(1), smear=smear, tot_zeff_corr=tot_zeff_corr)
@@ -280,15 +275,8 @@ CONTAINS
             CALL set_mo_occupation_1(mo_array(1), smear=smear, probe=probe)
             CALL set_mo_occupation_1(mo_array(2), smear=smear, probe=probe)
          ELSE IF (PRESENT(eval_deriv)) THEN
-            IF (PRESENT(tot_zeff_corr)) THEN
-               CALL set_mo_occupation_1(mo_array(1), smear=smear, eval_deriv=eval_deriv, &
-                                        tot_zeff_corr=tot_zeff_corr)
-               CALL set_mo_occupation_1(mo_array(2), smear=smear, eval_deriv=eval_deriv, &
-                                        tot_zeff_corr=tot_zeff_corr)
-            ELSE
-               CALL set_mo_occupation_1(mo_array(1), smear=smear, eval_deriv=eval_deriv)
-               CALL set_mo_occupation_1(mo_array(2), smear=smear, eval_deriv=eval_deriv)
-            END IF
+            CALL set_mo_occupation_1(mo_array(1), smear=smear, eval_deriv=eval_deriv)
+            CALL set_mo_occupation_1(mo_array(2), smear=smear, eval_deriv=eval_deriv)
          ELSE
             IF (PRESENT(tot_zeff_corr)) THEN
                CALL set_mo_occupation_1(mo_array(1), smear=smear, tot_zeff_corr=tot_zeff_corr)
@@ -410,11 +398,10 @@ CONTAINS
 !>        10.2019 Added functionality to adjust mo occupation if the core
 !>                charges are changed via CORE_CORRECTION during surface dipole
 !>                calculation. Total number of electrons matches the total core
-!>                charges if tot_zeff_corr is non-zero. [Soumya Ghosh]
-!>        02.2026 Extended to support OT methods by adjusting n_el_f and using
-!>                Fermi-Dirac smearing for fractional occupations.
+!>                charges if tot_zeff_corr is non-zero. Not yet implemented for
+!>                OT type method. [Soumya Ghosh]
 !> \author  Matthias Krack
-!> \version 1.2
+!> \version 1.1
 ! **************************************************************************************************
    SUBROUTINE set_mo_occupation_1(mo_set, smear, eval_deriv, xas_env, tot_zeff_corr, probe)
 
@@ -481,11 +468,8 @@ CONTAINS
 ! the inputfile
          IF (PRESENT(tot_zeff_corr)) THEN
 ! find the additional core charges
-! This code path works for both diagonalization and OT methods
             total_zeff_corr = tot_zeff_corr
             IF (INT(mo_set%maxocc) == 1) total_zeff_corr = total_zeff_corr/2.0_dp
-            ! Also update n_el_f for consistency
-            mo_set%n_el_f = REAL(mo_set%nelectron, KIND=dp) + total_zeff_corr
             delectron = 0.0_dp
             IF (total_zeff_corr < 0.0_dp) THEN
 ! remove electron density from the mos

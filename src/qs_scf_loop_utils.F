@@ -155,12 +155,10 @@ CONTAINS
       IF (dft_control%correct_el_density_dip) THEN
          scf_env%sum_zeff_corr = qs_env%total_zeff_corr
          IF (ABS(qs_env%total_zeff_corr) > 0.0_dp) THEN
-            ! Allow both standard diagonalization and OT methods
-            IF (scf_env%method /= general_diag_method_nr .AND. &
-                scf_env%method /= ot_method_nr) THEN
+            IF (scf_env%method /= general_diag_method_nr) THEN
                CALL cp_abort(__LOCATION__, &
                              "Please use ALGORITHM STANDARD in "// &
-                             "SCF%DIAGONALIZATION or SCF%OT if "// &
+                             "SCF%DIAGONALIZATION if "// &
                              "CORE_CORRECTION /= 0.0 and "// &
                              "SURFACE_DIPOLE_CORRECTION TRUE ")
             ELSEIF (dft_control%roks) THEN
@@ -453,24 +451,12 @@ CONTAINS
       ! in case of LSD the first spin qs_ot_env will drive the minimization
       ! in the case of a restricted calculation, it will make sure the spin orbitals are equal
 
-      IF (ABS(scf_env%sum_zeff_corr) > 0.0_dp) THEN
-         CALL ot_scf_mini(mos, mo_derivs, smear, orthogonality_metric, &
-                          total_energy, energy_only, scf_env%iter_delta, &
-                          scf_env%qs_ot_env, tot_zeff_corr=scf_env%sum_zeff_corr)
-      ELSE
-         CALL ot_scf_mini(mos, mo_derivs, smear, orthogonality_metric, &
-                          total_energy, energy_only, scf_env%iter_delta, &
-                          scf_env%qs_ot_env)
-      END IF
+      CALL ot_scf_mini(mos, mo_derivs, smear, orthogonality_metric, &
+                       total_energy, energy_only, scf_env%iter_delta, &
+                       scf_env%qs_ot_env)
 
-      ! Note: ot_scf_mini already calls set_mo_occupation with tot_zeff_corr
-      ! This final call ensures occupations are set correctly after OT minimization
       DO ispin = 1, SIZE(mos)
-         IF (ABS(scf_env%sum_zeff_corr) > 0.0_dp) THEN
-            CALL set_mo_occupation(mo_set=mos(ispin), smear=smear, tot_zeff_corr=scf_env%sum_zeff_corr)
-         ELSE
-            CALL set_mo_occupation(mo_set=mos(ispin), smear=smear)
-         END IF
+         CALL set_mo_occupation(mo_set=mos(ispin), smear=smear)
       END DO
 
       DO ispin = 1, SIZE(mos)
