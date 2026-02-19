@@ -16,7 +16,6 @@ Type definitions for the thermopotentiostat structure including:
 - Target dipole moment
 - Coupling strength (feedback gain)
 - Current zeff correction value
-- Min/max limits for zeff correction
 - PI (proportional-integral) control parameters
 - `thermopotentiostat_create()` and `thermopotentiostat_release()` subroutines
 
@@ -41,8 +40,6 @@ thermopotentiostat_ensemble = 15
   - `DIPOLE_DIRECTION` - X, Y, or Z component to control
   - `COUPLING_STRENGTH` - Proportional feedback gain
   - `ELEMENT` - Element symbol of atom kind to modify
-  - `MAX_ZEFF_CORRECTION` - Maximum allowed correction
-  - `MIN_ZEFF_CORRECTION` - Minimum allowed correction
   - `USE_INTEGRAL_CONTROL` - Enable PI control
   - `INTEGRAL_GAIN` - Integral term gain
 
@@ -131,8 +128,6 @@ Control output with print key:
       DIPOLE_DIRECTION Z       ! Control Z-component
       COUPLING_STRENGTH 0.1    ! Feedback gain
       ELEMENT Li               ! Modify Li atoms
-      MAX_ZEFF_CORRECTION 1.0
-      MIN_ZEFF_CORRECTION -1.0
       USE_INTEGRAL_CONTROL .FALSE.
       INTEGRAL_GAIN 0.01
     &END THERMOPOTENTIOSTAT
@@ -306,8 +301,8 @@ if use_integral_control:
     integral_error += dipole_error * dt
     delta_zeff += integral_gain * integral_error
 
-# Apply with limits
-new_zeff_corr = clip(current_zeff_corr + delta_zeff, min, max)
+# Apply changes
+new_zeff_corr = current_zeff_corr + delta_zeff
 ```
 
 This drives the system dipole towards the target value by adjusting the effective nuclear charge of the specified element, which in turn modifies the electron density distribution.
