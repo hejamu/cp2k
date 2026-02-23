@@ -89,6 +89,7 @@ MODULE thermopotentiostat_methods
 
    PUBLIC :: thermopotentiostat_init, &
              thermopotentiostat_update, &
+             thermopotentiostat_compute_potential, &
              update_zeff_correction_for_dipole, &
              print_thermopotentiostat_status
 
@@ -213,46 +214,18 @@ CONTAINS
       REAL(dp), INTENT(IN)                               :: temperature
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'thermopotentiostat_update'
-      CHARACTER(LEN=default_string_length)               :: description
 
-      INTEGER                                            :: handle, dir
-      REAL(dp)                                           :: area, dipole_moment, current_potential, &
+      INTEGER                                            :: handle
+      REAL(dp)                                           :: current_potential, &
                                                             dissipative_term, exp_factor, &
                                                             exp_factor_2, fluctuation_term, &
                                                             k_B_T, new_zeff_corr, random_number
-      TYPE(cell_type), POINTER                           :: cell
-      TYPE(cp_result_type), POINTER                      :: results
 
       CALL timeset(routineN, handle)
 
-      NULLIFY (results, cell)
-
-      ! Get the cell to calculate surface area
-      CALL get_qs_env(qs_env, cell=cell, results=results)
-
-      ! Calculate surface area perpendicular to dipole direction
-      ! For orthorhombic cells: area = product of two perpendicular cell dimensions
-      dir = thermo_pot%direction
-      SELECT CASE (dir)
-      CASE (1)  ! X direction: area = Y * Z
-         area = cell%hmat(2, 2) * cell%hmat(3, 3)
-      CASE (2)  ! Y direction: area = X * Z
-         area = cell%hmat(1, 1) * cell%hmat(3, 3)
-      CASE (3)  ! Z direction: area = X * Y
-         area = cell%hmat(1, 1) * cell%hmat(2, 2)
-      END SELECT
-
-      ! Use surface dipole correction dipole (physically meaningful for surfaces)
-      ! instead of MOMENTS dipole (which includes periodic images)
-      ! Surface dipole is available and valid
-
-      ! Set the perpendicular component to the surface dipole
-      dipole_moment = qs_env%surface_dipole_moment * bohr
-      ! Store last dipole for output
-      thermo_pot%last_dipole = dipole_moment
-
-      ! Calculate current potential from dipole: V = -4*pi*dipole / area
-      current_potential = - 4.0_dp * pi * dipole_moment / area
+      ! Compute current potential from surface dipole and store in thermo_pot
+      CALL thermopotentiostat_compute_potential(thermo_pot, qs_env)
+      current_potential = thermo_pot%last_current_potential
 
       ! Calculate exponential factors for Langevin dynamics
       ! exp_factor = 1 - exp(-dt/tau)
@@ -277,8 +250,7 @@ CONTAINS
       fluctuation_term = random_number * &
                            SQRT(k_B_T * thermo_pot%geometric_capacitance * exp_factor_2)
 
-      ! Store values for output
-      thermo_pot%last_current_potential = current_potential
+      ! Store Langevin terms for output (potential already stored by thermopotentiostat_compute_potential)
       thermo_pot%last_dissipative_term = dissipative_term
       thermo_pot%last_fluctuation_term = fluctuation_term
 
@@ -373,6 +345,49 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE update_zeff_correction_for_dipole
+
+! **************************************************************************************************
+!> \brief Compute and store the current potential from the surface dipole moment
+!>        This is used to populate the thermopotentiostat output values at step 0,
+!>        before the first Langevin update. Only computes and stores the potential;
+!>        does NOT perform the Langevin dynamics (dissipative/fluctuation terms remain zero).
+!> \param thermo_pot the thermopotentiostat structure
+!> \param qs_env the QS environment
+! **************************************************************************************************
+   SUBROUTINE thermopotentiostat_compute_potential(thermo_pot, qs_env)
+
+      TYPE(thermopotentiostat_type), INTENT(INOUT)       :: thermo_pot
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+
+      INTEGER                                            :: dir
+      REAL(dp)                                           :: area, dipole_moment, current_potential
+      TYPE(cell_type), POINTER                           :: cell
+
+      IF (.NOT. thermo_pot%active) RETURN
+
+      NULLIFY (cell)
+      CALL get_qs_env(qs_env, cell=cell)
+
+      ! Calculate surface area perpendicular to dipole direction
+      dir = thermo_pot%direction
+      SELECT CASE (dir)
+      CASE (1)  ! X direction: area = Y * Z
+         area = cell%hmat(2, 2) * cell%hmat(3, 3)
+      CASE (2)  ! Y direction: area = X * Z
+         area = cell%hmat(1, 1) * cell%hmat(3, 3)
+      CASE (3)  ! Z direction: area = X * Y
+         area = cell%hmat(1, 1) * cell%hmat(2, 2)
+      END SELECT
+
+      ! Get surface dipole moment
+      dipole_moment = qs_env%surface_dipole_moment * bohr
+      thermo_pot%last_dipole = dipole_moment
+
+      ! Calculate current potential from dipole: V = -4*pi*dipole / area
+      current_potential = - 4.0_dp * pi * dipole_moment / area
+      thermo_pot%last_current_potential = current_potential
+
+   END SUBROUTINE thermopotentiostat_compute_potential
 
 ! **************************************************************************************************
 !> \brief Print thermopotentiostat status to output file and dedicated file

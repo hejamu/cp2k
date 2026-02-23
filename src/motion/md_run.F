@@ -97,6 +97,9 @@ MODULE md_run
    USE virial_types,                    ONLY: virial_type
    USE wiener_process,                  ONLY: create_wiener_process,&
                                               create_wiener_process_cv
+   USE thermopotentiostat_types,        ONLY: thermopotentiostat_type
+   USE thermopotentiostat_methods,      ONLY: thermopotentiostat_init,&
+                                              thermopotentiostat_compute_potential
 #include "../base/base_uses.f90"
 
    IMPLICIT NONE
@@ -437,6 +440,21 @@ CONTAINS
 
          CALL virial_evaluate(atomic_kinds%els, particles%els, local_particles, &
                               virial, force_env%para_env)
+
+         ! Initialize thermopotentiostat before md_write_output so step 0 is printed
+         IF (simpar%ensemble == thermopotentiostat_ensemble) THEN
+            BLOCK
+               TYPE(thermopotentiostat_type), POINTER :: thermo_pot
+               NULLIFY (thermo_pot)
+               CALL get_md_env(md_env=md_env, thermopotentiostat=thermo_pot)
+               IF (.NOT. ASSOCIATED(thermo_pot)) THEN
+                  CALL thermopotentiostat_init(thermo_pot, md_section, force_env%qs_env)
+                  CALL set_md_env(md_env, thermopotentiostat=thermo_pot)
+               END IF
+               ! Compute initial potential from surface dipole for step 0 output
+               CALL thermopotentiostat_compute_potential(thermo_pot, force_env%qs_env)
+            END BLOCK
+         END IF
 
          CALL md_energy(md_env, md_ener)
          CALL md_write_output(md_env) !inits the print env at itimes == 0 also writes trajectories
