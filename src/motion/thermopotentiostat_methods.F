@@ -63,7 +63,6 @@ MODULE thermopotentiostat_methods
    USE particle_types,                  ONLY: particle_type
    USE physcon,                         ONLY: debye, &
                                               evolt, &
-                                              kelvin, &
                                               bohr
    USE qs_environment_types,            ONLY: get_qs_env, &
                                               qs_environment_type
@@ -201,27 +200,25 @@ CONTAINS
 !>        Fluctuation term: N * sqrt(k_B * T * C * (1 - exp(-2*dt/tau)))
 !> \param thermo_pot the thermopotentiostat structure
 !> \param qs_env the QS environment
-!> \param dt the timestep
-!> \param temperature the temperature in Kelvin
-!> \param dipole_moment output: the current dipole moment
-!> \param dipole_available output: whether dipole was available
+!> \param simpar the simulation parameters (timestep, temperature, etc.)
 ! **************************************************************************************************
-   SUBROUTINE thermopotentiostat_update(thermo_pot, qs_env, dt, temperature)
+   SUBROUTINE thermopotentiostat_update(thermo_pot, qs_env, simpar)
 
       TYPE(thermopotentiostat_type), INTENT(INOUT)       :: thermo_pot
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      REAL(dp), INTENT(IN)                               :: dt
-      REAL(dp), INTENT(IN)                               :: temperature
+      TYPE(simpar_type), INTENT(IN)                      :: simpar
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'thermopotentiostat_update'
 
       INTEGER                                            :: handle
-      REAL(dp)                                           :: current_potential, &
+      REAL(dp)                                           :: current_potential, dt, &
                                                             dissipative_term, exp_factor, &
                                                             exp_factor_2, fluctuation_term, &
                                                             k_B_T, new_zeff_corr, random_number
 
       CALL timeset(routineN, handle)
+
+      dt = simpar%dt
 
       ! Compute current potential from surface dipole and store in thermo_pot
       CALL thermopotentiostat_compute_potential(thermo_pot, qs_env)
@@ -244,11 +241,9 @@ CONTAINS
                            (current_potential - thermo_pot%target_potential) * exp_factor
 
       ! Fluctuation term: N * sqrt(k_B * T * C * (1 - exp(-2*dt/tau)))
-      ! k_B * T in atomic units: temperature / kelvin (since kelvin = a.u.->K)
-      k_B_T = temperature / kelvin
-      random_number = thermo_pot%rng_stream%next()
-      fluctuation_term = random_number * &
-                           SQRT(k_B_T * thermo_pot%geometric_capacitance * exp_factor_2)
+      ! simpar%temp_ext is already k_B*T in atomic units (Hartree)
+      fluctuation_term = thermo_pot%rng_stream%next() * &
+                           SQRT(simpar%temp_ext * thermo_pot%geometric_capacitance * exp_factor_2)
 
       ! Store Langevin terms for output (potential already stored by thermopotentiostat_compute_potential)
       thermo_pot%last_dissipative_term = dissipative_term

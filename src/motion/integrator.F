@@ -729,8 +729,7 @@ CONTAINS
       ! After force calculation, update zeff_correction based on dipole moment
       IF (ASSOCIATED(force_env%qs_env) .AND. ASSOCIATED(thermo_pot)) THEN
          ! Update thermopotentiostat based on current dipole
-         CALL thermopotentiostat_update(thermo_pot, force_env%qs_env, dt, &
-                                        simpar%temp_ext)
+         CALL thermopotentiostat_update(thermo_pot, force_env%qs_env, simpar)
 
          ! Apply the updated zeff_correction to the system
          ! This modifies the GTH potential and qs_env%total_zeff_corr

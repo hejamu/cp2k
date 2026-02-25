@@ -470,6 +470,8 @@ CONTAINS
 ! find the additional core charges
             total_zeff_corr = tot_zeff_corr
             IF (INT(mo_set%maxocc) == 1) total_zeff_corr = total_zeff_corr/2.0_dp
+            ! Update n_el_f so Fermi-Dirac smearing uses the corrected electron count
+            mo_set%n_el_f = REAL(mo_set%nelectron, KIND=dp) + total_zeff_corr
             delectron = 0.0_dp
             IF (total_zeff_corr < 0.0_dp) THEN
 ! remove electron density from the mos
