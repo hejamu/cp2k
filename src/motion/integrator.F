@@ -104,8 +104,7 @@ MODULE integrator
                                               apply_thermostat_particles,&
                                               apply_thermostat_shells
    USE thermostat_types,                ONLY: thermostat_type
-   USE thermopotentiostat_types,        ONLY: thermopotentiostat_type,&
-                                              thermopotentiostat_release
+   USE thermopotentiostat_types,        ONLY: thermopotentiostat_type
    USE thermopotentiostat_methods,      ONLY: thermopotentiostat_init,&
                                               thermopotentiostat_update,&
                                               update_zeff_correction_for_dipole
@@ -613,10 +612,9 @@ CONTAINS
 
       INTEGER                                            :: handle, nparticle, nparticle_kind, nshell
       INTEGER, POINTER                                   :: itimes
-      LOGICAL                                            :: dipole_available, shell_adiabatic, &
+      LOGICAL                                            :: shell_adiabatic, &
                                                             shell_check_distance, shell_present
       REAL(KIND=dp)                                      :: dt
-      REAL(KIND=dp), DIMENSION(3)                        :: dipole_moment
       TYPE(atomic_kind_list_type), POINTER               :: atomic_kinds
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell

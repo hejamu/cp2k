@@ -380,6 +380,21 @@ CONTAINS
             CALL section_vals_remove_values(work_section)
          END IF
 
+         ! Initialize thermopotentiostat BEFORE the first force calculation
+         ! so that the restart electrode charge is applied to the GTH potential
+         ! and the correct electron count is used in the first SCF
+         IF (simpar%ensemble == thermopotentiostat_ensemble) THEN
+            BLOCK
+               TYPE(thermopotentiostat_type), POINTER :: thermo_pot
+               NULLIFY (thermo_pot)
+               CALL get_md_env(md_env=md_env, thermopotentiostat=thermo_pot)
+               IF (.NOT. ASSOCIATED(thermo_pot)) THEN
+                  CALL thermopotentiostat_init(thermo_pot, md_section, force_env%qs_env)
+                  CALL set_md_env(md_env, thermopotentiostat=thermo_pot)
+               END IF
+            END BLOCK
+         END IF
+
          IF (ehrenfest_md) THEN
             CALL rt_prop_setup(force_env)
             force_env%qs_env%rtp%dt = simpar%dt
@@ -441,17 +456,13 @@ CONTAINS
          CALL virial_evaluate(atomic_kinds%els, particles%els, local_particles, &
                               virial, force_env%para_env)
 
-         ! Initialize thermopotentiostat before md_write_output so step 0 is printed
+         ! Compute initial potential from surface dipole for step 0 output
+         ! (thermopotentiostat was already initialized before the first force calculation)
          IF (simpar%ensemble == thermopotentiostat_ensemble) THEN
             BLOCK
                TYPE(thermopotentiostat_type), POINTER :: thermo_pot
                NULLIFY (thermo_pot)
                CALL get_md_env(md_env=md_env, thermopotentiostat=thermo_pot)
-               IF (.NOT. ASSOCIATED(thermo_pot)) THEN
-                  CALL thermopotentiostat_init(thermo_pot, md_section, force_env%qs_env)
-                  CALL set_md_env(md_env, thermopotentiostat=thermo_pot)
-               END IF
-               ! Compute initial potential from surface dipole for step 0 output
                CALL thermopotentiostat_compute_potential(thermo_pot, force_env%qs_env)
             END BLOCK
          END IF

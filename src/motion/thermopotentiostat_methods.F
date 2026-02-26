@@ -21,26 +21,16 @@
 ! **************************************************************************************************
 MODULE thermopotentiostat_methods
 
-   USE atomic_kind_list_types,          ONLY: atomic_kind_list_type
    USE atomic_kind_types,               ONLY: atomic_kind_type, &
                                               get_atomic_kind
    USE cell_types,                      ONLY: cell_type
-   USE cp_log_handling,                 ONLY: cp_get_default_logger, &
-                                              cp_logger_type
-   USE cp_output_handling,              ONLY: cp_p_file, &
-                                              cp_print_key_finished_output, &
-                                              cp_print_key_should_output, &
+   USE cp_control_types,                ONLY: dft_control_type
+   USE cp_log_handling,                 ONLY: cp_logger_type
+   USE cp_output_handling,              ONLY: cp_print_key_finished_output, &
                                               cp_print_key_unit_nr
-   USE cp_result_methods,               ONLY: get_results, &
-                                              test_for_result
-   USE cp_result_types,                 ONLY: cp_result_type
-   USE cp_subsys_types,                 ONLY: cp_subsys_get, &
-                                              cp_subsys_type
-   USE distribution_1d_types,           ONLY: distribution_1d_type
-   USE force_env_methods,               ONLY: force_env_calc_energy_force
-   USE force_env_types,                 ONLY: force_env_get, &
-                                              force_env_type
-   USE global_types,                    ONLY: global_environment_type
+   USE external_potential_types,        ONLY: get_potential, &
+                                              gth_potential_type, &
+                                              set_potential
    USE input_section_types,             ONLY: section_vals_get_subs_vals, &
                                               section_vals_type, &
                                               section_vals_val_get
@@ -48,35 +38,18 @@ MODULE thermopotentiostat_methods
                                               dp
    USE machine,                         ONLY: m_flush
    USE mathconstants,                   ONLY: pi
-   USE md_environment_types,            ONLY: get_md_env, &
-                                              md_environment_type
-   USE message_passing,                 ONLY: mp_para_env_type
-   USE molecule_kind_list_types,        ONLY: molecule_kind_list_type
-   USE molecule_kind_types,             ONLY: molecule_kind_type
-   USE molecule_list_types,             ONLY: molecule_list_type
-   USE molecule_types,                  ONLY: global_constraint_type, &
-                                              molecule_type
    USE parallel_rng_types,              ONLY: GAUSSIAN, &
                                               next_rng_seed, &
                                               rng_stream_type
-   USE particle_list_types,             ONLY: particle_list_type
-   USE particle_types,                  ONLY: particle_type
-   USE physcon,                         ONLY: debye, &
-                                              evolt, &
-                                              bohr
+   USE physcon,                         ONLY: bohr, &
+                                              evolt
    USE qs_environment_types,            ONLY: get_qs_env, &
                                               qs_environment_type
    USE qs_kind_types,                   ONLY: get_qs_kind_set, &
                                               qs_kind_type
-   USE cp_control_types,                ONLY: dft_control_type
    USE simpar_types,                    ONLY: simpar_type
-   USE cell_types,                      ONLY: cell_type
-   USE external_potential_types,        ONLY: get_potential, &
-                                              gth_potential_type, &
-                                              set_potential
    USE thermopotentiostat_types,        ONLY: thermopotentiostat_type, &
-                                              thermopotentiostat_create, &
-                                              thermopotentiostat_release
+                                              thermopotentiostat_create
 
 #include "../base/base_uses.f90"
 
@@ -130,9 +103,15 @@ CONTAINS
       CALL section_vals_val_get(thermo_section, "ELEMENT", c_val=element_symbol)
       CALL section_vals_val_get(thermo_section, "ELECTRODE_CHARGE", r_val=electrode_charge)
 
-      ! Check that element was specified
+      ! Validate input parameters
       IF (LEN_TRIM(element_symbol) == 0) THEN
          CPABORT("THERMOPOTENTIOSTAT requires ELEMENT to be specified")
+      END IF
+      IF (geometric_capacitance <= 0.0_dp) THEN
+         CPABORT("THERMOPOTENTIOSTAT: GEOMETRIC_CAPACITANCE must be positive")
+      END IF
+      IF (timecon < 0.0_dp) THEN
+         CPABORT("THERMOPOTENTIOSTAT: TIMECON must be non-negative")
       END IF
 
       ! Create the thermopotentiostat structure
@@ -150,13 +129,11 @@ CONTAINS
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set, dft_control=dft_control)
       nkind = SIZE(qs_kind_set)
 
-      ! Enable CORE_CORR_DIP automatically for thermopotentiostat
-      ! This is required for electron density to respond to zeff_correction changes
-      ! Note: SURFACE_DIPOLE_CORRECTION is already validated in md_run.F
-      IF (.NOT. dft_control%correct_el_density_dip) THEN
-         dft_control%correct_el_density_dip = .TRUE.
-         CPWARN("THERMOPOTENTIOSTAT: Auto-enabling CORE_CORR_DIP")
-      END IF
+      ! Verify required DFT settings are active
+      IF (.NOT. dft_control%correct_surf_dip) &
+         CPABORT("THERMOPOTENTIOSTAT requires SURFACE_DIPOLE_CORRECTION")
+      IF (.NOT. dft_control%correct_el_density_dip) &
+         CPABORT("THERMOPOTENTIOSTAT requires CORE_CORR_DIP")
 
       element_found = .FALSE.
       DO ikind = 1, nkind
@@ -187,6 +164,7 @@ CONTAINS
       ! and apply the correction to the GTH potential before the first force calculation
       IF (ABS(electrode_charge) > 0.0_dp) THEN
          thermo_pot%current_zeff_corr = electrode_charge
+         CPWARN("THERMOPOTENTIOSTAT: Restoring electrode charge from restart file")
          CALL update_zeff_correction_for_dipole(thermo_pot, qs_env)
       END IF
 
@@ -214,7 +192,7 @@ CONTAINS
       REAL(dp)                                           :: current_potential, dt, &
                                                             dissipative_term, exp_factor, &
                                                             exp_factor_2, fluctuation_term, &
-                                                            k_B_T, new_zeff_corr, random_number
+                                                            new_zeff_corr
 
       CALL timeset(routineN, handle)
 
@@ -296,6 +274,11 @@ CONTAINS
 
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set, atomic_kind_set=atomic_kind_set)
 
+      ! Validate atom_kind_index is within bounds
+      IF (ikind < 1 .OR. ikind > SIZE(qs_kind_set)) THEN
+         CPABORT("THERMOPOTENTIOSTAT: atom_kind_index out of bounds")
+      END IF
+
       ! Get the number of atoms of this kind
       CALL get_atomic_kind(atomic_kind_set(ikind), natom=natom_kind)
 
@@ -307,29 +290,32 @@ CONTAINS
          CPABORT("THERMOPOTENTIOSTAT: No atoms found for the specified element")
       END IF
 
-      IF (ASSOCIATED(qs_kind_set(ikind)%gth_potential)) THEN
-         gth_potential => qs_kind_set(ikind)%gth_potential
-
-         ! Get current parameters
-         CALL get_potential(potential=gth_potential, &
-                            elec_conf=elec_conf, &
-                            alpha_core_charge=alpha)
-
-         ! Calculate new zeff and derived quantities using per-atom correction
-         new_zeff = REAL(SUM(elec_conf), dp) + zeff_corr_per_atom
-
-         ! Update the core charge coefficient: ccore_charge = zeff * sqrt((alpha/pi)^3)
-         ccore_charge = new_zeff * SQRT((alpha/pi)**3)
-         cerf_ppl = ccore_charge  ! Same formula for error function coefficient
-
-         ! Set the updated values on the potential
-         CALL set_potential(gth_potential, &
-                            zeff=new_zeff, &
-                            zeff_correction=zeff_corr_per_atom, &
-                            ccore_charge=ccore_charge, &
-                            cerf_ppl=cerf_ppl)
-
+      IF (.NOT. ASSOCIATED(qs_kind_set(ikind)%gth_potential)) THEN
+         CALL cp_abort(__LOCATION__, &
+                       "THERMOPOTENTIOSTAT: GTH potential for element "// &
+                       TRIM(thermo_pot%element_symbol)//" is no longer associated")
       END IF
+
+      gth_potential => qs_kind_set(ikind)%gth_potential
+
+      ! Get current parameters
+      CALL get_potential(potential=gth_potential, &
+                         elec_conf=elec_conf, &
+                         alpha_core_charge=alpha)
+
+      ! Calculate new zeff and derived quantities using per-atom correction
+      new_zeff = REAL(SUM(elec_conf), dp) + zeff_corr_per_atom
+
+      ! Update the core charge coefficient: ccore_charge = zeff * sqrt((alpha/pi)^3)
+      ccore_charge = new_zeff * SQRT((alpha/pi)**3)
+      cerf_ppl = ccore_charge  ! Same formula for error function coefficient
+
+      ! Set the updated values on the potential
+      CALL set_potential(gth_potential, &
+                         zeff=new_zeff, &
+                         zeff_correction=zeff_corr_per_atom, &
+                         ccore_charge=ccore_charge, &
+                         cerf_ppl=cerf_ppl)
 
       ! Update total_zeff_corr in qs_env for electron density adjustment
       ! This is used by qs_mo_occupation to adjust the electron count
@@ -372,6 +358,8 @@ CONTAINS
          area = cell%hmat(1, 1) * cell%hmat(3, 3)
       CASE (3)  ! Z direction: area = X * Y
          area = cell%hmat(1, 1) * cell%hmat(2, 2)
+      CASE DEFAULT
+         CPABORT("THERMOPOTENTIOSTAT: Invalid DIPOLE_DIRECTION")
       END SELECT
 
       ! Get surface dipole moment

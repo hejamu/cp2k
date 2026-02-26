@@ -36,11 +36,11 @@ MODULE thermopotentiostat_types
 !> \brief Type to store thermopotentiostat parameters and state
 ! **************************************************************************************************
    TYPE thermopotentiostat_type
-      ! Target potential in atomic units (converted from Volts)
+      ! Target potential in atomic units
       REAL(dp)                              :: target_potential = 0.0_dp
-      ! Geometric capacitance in atomic units (converted from attofarads)
+      ! Geometric capacitance in atomic units
       REAL(dp)                              :: geometric_capacitance = 0.1_dp
-      ! Time constant for thermopotentiostat response in atomic units (converted from fs)
+      ! Time constant for thermopotentiostat response in atomic units
       REAL(dp)                              :: timecon = 0.0_dp
       ! Current zeff correction value being applied
       REAL(dp)                              :: current_zeff_corr = 0.0_dp
@@ -52,8 +52,8 @@ MODULE thermopotentiostat_types
       CHARACTER(LEN=default_string_length)  :: element_symbol = ""
       ! Store the initial zeff_correction from input
       REAL(dp)                              :: initial_zeff_corr = 0.0_dp
-      ! Last measured dipole moment for output
-      REAL(dp), DIMENSION(3)                :: last_dipole = [0.0_dp, 0.0_dp, 0.0_dp]
+      ! Last measured surface dipole moment for output
+      REAL(dp)                              :: last_dipole = 0.0_dp
       ! Last calculated current potential for output
       REAL(dp)                              :: last_current_potential = 0.0_dp
       ! Last dissipative term (change in electron count) for output
